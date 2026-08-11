@@ -10,79 +10,238 @@
     <style>
       * {
         box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --panel-w: min(240px, max(220px, 22vw), calc(100vw - 16px));
+        --bg: #f4f5f8;
+        --panel-bg: #ffffff;
+        --text: #171923;
+        --muted: #6b7280;
+        --accent: #3d5a9a;
+        --border: #e8eaef;
+        --area-muted: #eceff5;
+        --readout-bg: #ffffff;
+        --font-app: ui-sans-serif, system-ui, sans-serif;
       }
 
       html,
       body {
-        margin: 0;
         height: 100%;
+        width: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-app);
+      }
+
+      button {
+        font-family: inherit;
+      }
+
+      .app-root {
+        position: relative;
+        box-sizing: border-box;
+        width: 100%;
+        height: 100vh;
+        height: 100dvh;
+        padding: 8px;
+        padding-left: calc(8px + var(--panel-w) + 8px);
+        background: var(--bg);
+        overflow: hidden;
+      }
+
+      .left-panel {
+        position: fixed;
+        inset: 8px auto 8px 8px;
+        z-index: 100;
+        width: var(--panel-w);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: var(--panel-bg);
+        color: var(--text);
+      }
+
+      .panel-copy {
+        display: grid;
+        gap: 12px;
+        padding: 14px 12px 0;
+        flex-shrink: 0;
+      }
+
+      .panel-title {
+        margin: 0;
+        font-size: 1.125rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+
+      .mode-switch {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 4px;
+        padding: 4px;
+        border-radius: 12px;
+        background: var(--area-muted);
+      }
+
+      .mode-switch__btn {
+        appearance: none;
+        min-height: 40px;
+        padding: 8px 6px;
+        border: none;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 0.82rem;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+      }
+
+      .mode-switch__btn:hover {
+        color: var(--text);
+      }
+
+      .mode-switch__btn.is-active {
+        background: var(--panel-bg);
+        color: var(--text);
+        box-shadow: 0 1px 3px rgb(23 25 35 / 0.1);
+      }
+
+      .mode-switch__btn.is-run.is-active {
+        background: #16a34a;
+        color: #fff;
+        box-shadow: 0 1px 3px rgb(22 163 74 / 0.35);
+      }
+
+      .mode-switch__btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .panel-actions {
+        display: grid;
+        gap: 8px;
+      }
+
+      .action-btn {
+        appearance: none;
+        min-height: 40px;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--area-muted);
+        color: var(--text);
+        font-weight: 600;
+        font-size: 0.88rem;
+        cursor: pointer;
+      }
+
+      .action-btn:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--readout-bg);
+      }
+
+      .action-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      .stock-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px;
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .panel-label {
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .stock-tray {
+        display: grid;
+        gap: 10px;
+        padding: 10px;
+        border: 1px dashed var(--border);
+        border-radius: 16px;
+        background: var(--area-muted);
+        min-height: 120px;
+        align-content: start;
+      }
+
+      .stock-tray.is-drop-target {
+        border-color: #58a1ff;
+        background: #eef5ff;
+      }
+
+      .stock-slot {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 8px;
+        min-height: 72px;
+        padding: 8px;
+        border-radius: 12px;
+        background: var(--panel-bg);
+        border: 1px solid var(--border);
+      }
+
+      .stock-slot__label {
+        flex: 0 0 100%;
+        text-align: center;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .stock-slot--weights {
+        min-height: 96px;
+      }
+
+      .workspace {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        border: 1px solid var(--border);
+        border-radius: 22px;
         background: #ffffff;
         overflow: hidden;
-        font-family: ui-sans-serif, system-ui, sans-serif;
       }
 
       #stage {
         position: relative;
-        width: 100vw;
-        height: 100vh;
-        height: 100dvh;
+        width: 100%;
+        height: 100%;
         background: #ffffff;
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
       }
 
-      #stage[data-tool="pencil"] {
+      .app-root[data-tool="pencil"] #stage {
         cursor: crosshair;
       }
 
-      #stage[data-tool="pencil"] .pulley {
+      .app-root[data-tool="pencil"] .pulley {
         pointer-events: none;
-      }
-
-      .toolbar {
-        position: absolute;
-        z-index: 20;
-        top: max(12px, env(safe-area-inset-top, 0px));
-        left: 50%;
-        transform: translateX(-50%);
-        display: flex;
-        gap: 8px;
-        padding: 6px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.92);
-        border: 1px solid rgba(15, 23, 42, 0.12);
-        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
-      }
-
-      .toolbar button {
-        appearance: none;
-        border: 1px solid transparent;
-        background: transparent;
-        color: #0f172a;
-        font: inherit;
-        font-size: 0.88rem;
-        font-weight: 600;
-        padding: 8px 14px;
-        border-radius: 999px;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-
-      .toolbar button:hover {
-        background: #f1f5f9;
-      }
-
-      .toolbar button.is-active {
-        background: #0f172a;
-        color: #fff;
-      }
-
-      .toolbar button:disabled {
-        opacity: 0.35;
-        cursor: not-allowed;
       }
 
       .pulley {
@@ -124,6 +283,37 @@
         width: 104px;
       }
 
+      .pulley.is-docked,
+      .pulley.is-stock-template,
+      .weight.is-docked,
+      .weight.is-stock-template {
+        position: relative;
+        left: auto !important;
+        top: auto !important;
+        z-index: 1;
+      }
+
+      .pulley.is-docked.pulley--fixed,
+      .pulley.is-stock-template.pulley--fixed {
+        transform: none;
+      }
+
+      .pulley.is-docked.pulley--fixed svg,
+      .pulley.is-stock-template.pulley--fixed svg {
+        width: 76px;
+      }
+
+      .pulley.is-docked.pulley--free,
+      .pulley.is-stock-template.pulley--free {
+        transform: rotate(180deg) scale(0.72);
+        transform-origin: 50% 50%;
+      }
+
+      .pulley.is-docked.pulley--free svg,
+      .pulley.is-stock-template.pulley--free svg {
+        width: 72px;
+      }
+
       .weight {
         position: absolute;
         z-index: 3;
@@ -145,6 +335,11 @@
         height: auto;
       }
 
+      .weight.is-docked svg,
+      .weight.is-stock-template svg {
+        width: 48px;
+      }
+
       .weight.is-snapping {
         filter: drop-shadow(0 0 0 #58a1ff);
         outline: 2px dashed #58a1ff;
@@ -152,24 +347,15 @@
         border-radius: 4px;
       }
 
-      #stage[data-tool="pencil"] .weight {
+      .app-root[data-tool="pencil"] .weight {
         pointer-events: none;
       }
 
-      #stage[data-tool="run"] .pulley,
-      #stage[data-tool="run"] .weight,
-      #stage[data-tool="run"] #rope-layer {
+      .app-root[data-tool="run"] .pulley,
+      .app-root[data-tool="run"] .weight,
+      .app-root[data-tool="run"] #rope-layer {
         pointer-events: none;
         cursor: default;
-      }
-
-      .toolbar button.is-run {
-        background: #16a34a;
-        color: #fff;
-      }
-
-      .toolbar button.is-run:hover {
-        background: #15803d;
       }
 
       #rope-layer {
@@ -182,7 +368,7 @@
         pointer-events: none;
       }
 
-      #stage[data-tool="pencil"] #rope-layer {
+      .app-root[data-tool="pencil"] #rope-layer {
         pointer-events: auto;
         touch-action: none;
       }
@@ -206,11 +392,7 @@
         opacity: 1;
       }
 
-      #stage[data-tool="move"] {
-        cursor: default;
-      }
-
-      #stage[data-tool="move"] #rope-layer .rope-end-handle {
+      .app-root[data-tool="move"] #rope-layer .rope-end-handle {
         pointer-events: auto;
         touch-action: none;
       }
@@ -290,108 +472,178 @@
         stroke: #fff;
         stroke-width: 3px;
       }
+
+      @media (max-width: 720px) {
+        :root {
+          --panel-w: min(200px, 42vw);
+        }
+
+        .mode-switch__btn {
+          font-size: 0.74rem;
+          padding: 8px 4px;
+        }
+
+        .pulley--fixed svg {
+          width: 88px;
+        }
+
+        .pulley--free svg {
+          width: 82px;
+        }
+      }
     </style>
   </head>
   <body>
-    <div id="stage" data-tool="move" aria-label="Plocha s kladkami">
-      <div class="toolbar" role="toolbar" aria-label="Nástroje">
-        <button type="button" id="tool-move" class="is-active" aria-pressed="true">
-          Přesun
-        </button>
-        <button type="button" id="tool-pencil" aria-pressed="false">
-          Tužka
-        </button>
-        <button type="button" id="tool-run" aria-pressed="false">
-          Spustit
-        </button>
-        <button type="button" id="tool-clear" disabled>Smazat lano</button>
-      </div>
+    <div class="app-root" data-tool="move">
+      <aside class="left-panel" aria-label="Ovládání simulace">
+        <div class="panel-copy">
+          <h1 class="panel-title">Kladkostroj</h1>
+          <div class="mode-switch" role="tablist" aria-label="Mód simulace">
+            <button
+              type="button"
+              id="tool-move"
+              class="mode-switch__btn is-active"
+              role="tab"
+              aria-selected="true"
+              aria-pressed="true"
+            >
+              Přesun
+            </button>
+            <button
+              type="button"
+              id="tool-pencil"
+              class="mode-switch__btn"
+              role="tab"
+              aria-selected="false"
+              aria-pressed="false"
+            >
+              Tužka
+            </button>
+            <button
+              type="button"
+              id="tool-run"
+              class="mode-switch__btn"
+              role="tab"
+              aria-selected="false"
+              aria-pressed="false"
+            >
+              Spustit
+            </button>
+          </div>
+          <div class="panel-actions">
+            <button type="button" id="tool-clear" class="action-btn" disabled>
+              Smazat lano
+            </button>
+          </div>
+        </div>
 
-      <svg id="rope-layer" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+        <div class="stock-section">
+          <span class="panel-label">Zásobník</span>
+          <div class="stock-tray" id="stock-tray" aria-label="Zásobník kladek a závaží">
+            <div class="stock-slot" id="stock-slot-fixed" data-slot="fixed">
+              <span class="stock-slot__label">Pevná kladka</span>
+              <div
+            class="pulley pulley--fixed is-stock-template"
+            id="stock-template-fixed"
+            data-kind="fixed"
+            role="img"
+            aria-label="Pevná kladka — vytáhnout ze zásobníku"
+          >
+            <svg
+              width="276"
+              height="315"
+              viewBox="0 0 276 315"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M10.5898 176.404C10.5898 246.683 67.5605 303.654 137.839 303.654C208.118 303.654 265.089 246.683 265.089 176.404C265.089 106.125 208.118 49.1548 137.839 49.1548C67.5605 49.1548 10.5898 106.125 10.5898 176.404Z"
+                fill="#F03B50"
+              />
+              <path
+                d="M10.5898 176.404C10.5898 246.683 67.5605 303.654 137.839 303.654C208.118 303.654 265.089 246.683 265.089 176.404C265.089 106.125 208.118 49.1548 137.839 49.1548C67.5605 49.1548 10.5898 106.125 10.5898 176.404Z"
+                stroke="#F03B50"
+                stroke-width="21.18"
+                stroke-miterlimit="10"
+                stroke-linecap="round"
+              />
+              <path
+                d="M139.912 248.413V291.723"
+                stroke="white"
+                stroke-width="21.18"
+                stroke-miterlimit="10"
+                stroke-linecap="round"
+              />
+              <path
+                d="M96.3086 10.5898V174.982C96.3086 198.036 115 216.728 138.058 216.728C161.112 216.728 179.8 198.036 179.8 174.982V10.5898"
+                fill="#1D1D1B"
+              />
+              <path
+                d="M96.3086 10.5898V174.982C96.3086 198.036 115 216.728 138.058 216.728C161.112 216.728 179.8 198.036 179.8 174.982V10.5898"
+                stroke="#1D1D1B"
+                stroke-width="21.18"
+                stroke-miterlimit="10"
+                stroke-linecap="round"
+              />
+            </svg>
+          </div>
+            </div>
+            <div class="stock-slot" id="stock-slot-free" data-slot="free">
+              <span class="stock-slot__label">Volná kladka</span>
+              <div
+            class="pulley pulley--free is-stock-template"
+            id="stock-template-free"
+            data-kind="free"
+            role="img"
+            aria-label="Volná kladka — vytáhnout ze zásobníku"
+          >
+            <svg
+              width="282"
+              height="434"
+              viewBox="0 0 282 434"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M15.2495 292.717C15.2495 223.382 71.4595 167.177 140.789 167.177C210.124 167.177 266.329 223.382 266.329 292.717C266.329 362.052 210.124 418.257 140.789 418.257C71.4595 418.257 15.2495 362.052 15.2495 292.717Z"
+                fill="#58A1FF"
+              />
+              <path
+                d="M15.2495 292.717C15.2495 223.382 71.4595 167.177 140.789 167.177C210.124 167.177 266.329 223.382 266.329 292.717C266.329 362.052 210.124 418.257 140.789 418.257C71.4595 418.257 15.2495 362.052 15.2495 292.717Z"
+                stroke="#58A1FF"
+                stroke-width="30.4992"
+                stroke-miterlimit="10"
+                stroke-linecap="round"
+              />
+              <path
+                d="M35.6485 287.364C35.6485 298.344 44.5492 307.249 55.534 307.249C66.5137 307.249 75.4194 298.344 75.4194 287.364C75.4194 276.379 66.5137 267.479 55.534 267.479C44.5492 267.479 35.6485 276.379 35.6485 287.364Z"
+                fill="white"
+              />
+              <path
+                d="M143.473 15.2496L143.436 35.3689L142.995 281.162"
+                stroke="#1D1D1B"
+                stroke-width="30.4992"
+                stroke-miterlimit="10"
+                stroke-linecap="round"
+              />
+            </svg>
+          </div>
+            </div>
+            <div
+              class="stock-slot stock-slot--weights"
+              id="stock-slot-weights"
+              data-slot="weights"
+            >
+              <span class="stock-slot__label">Závaží</span>
+            </div>
+          </div>
+        </div>
+      </aside>
 
-      <div
-        class="pulley pulley--fixed"
-        id="fixed-pulley"
-        role="img"
-        aria-label="Pevná kladka"
-        style="left: 18%; top: 16%"
-      >
-        <svg
-          width="276"
-          height="315"
-          viewBox="0 0 276 315"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M10.5898 176.404C10.5898 246.683 67.5605 303.654 137.839 303.654C208.118 303.654 265.089 246.683 265.089 176.404C265.089 106.125 208.118 49.1548 137.839 49.1548C67.5605 49.1548 10.5898 106.125 10.5898 176.404Z"
-            fill="#F03B50"
-          />
-          <path
-            d="M10.5898 176.404C10.5898 246.683 67.5605 303.654 137.839 303.654C208.118 303.654 265.089 246.683 265.089 176.404C265.089 106.125 208.118 49.1548 137.839 49.1548C67.5605 49.1548 10.5898 106.125 10.5898 176.404Z"
-            stroke="#F03B50"
-            stroke-width="21.18"
-            stroke-miterlimit="10"
-            stroke-linecap="round"
-          />
-          <path
-            d="M139.912 248.413V291.723"
-            stroke="white"
-            stroke-width="21.18"
-            stroke-miterlimit="10"
-            stroke-linecap="round"
-          />
-          <path
-            d="M96.3086 10.5898V174.982C96.3086 198.036 115 216.728 138.058 216.728C161.112 216.728 179.8 198.036 179.8 174.982V10.5898"
-            fill="#1D1D1B"
-          />
-          <path
-            d="M96.3086 10.5898V174.982C96.3086 198.036 115 216.728 138.058 216.728C161.112 216.728 179.8 198.036 179.8 174.982V10.5898"
-            stroke="#1D1D1B"
-            stroke-width="21.18"
-            stroke-miterlimit="10"
-            stroke-linecap="round"
-          />
-        </svg>
-      </div>
-
-      <div
-        class="pulley pulley--free"
-        id="free-pulley"
-        role="img"
-        aria-label="Volná kladka"
-        style="left: 58%; top: 28%"
-      >
-        <svg
-          width="282"
-          height="434"
-          viewBox="0 0 282 434"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            d="M15.2495 292.717C15.2495 223.382 71.4595 167.177 140.789 167.177C210.124 167.177 266.329 223.382 266.329 292.717C266.329 362.052 210.124 418.257 140.789 418.257C71.4595 418.257 15.2495 362.052 15.2495 292.717Z"
-            fill="#58A1FF"
-          />
-          <path
-            d="M15.2495 292.717C15.2495 223.382 71.4595 167.177 140.789 167.177C210.124 167.177 266.329 223.382 266.329 292.717C266.329 362.052 210.124 418.257 140.789 418.257C71.4595 418.257 15.2495 362.052 15.2495 292.717Z"
-            stroke="#58A1FF"
-            stroke-width="30.4992"
-            stroke-miterlimit="10"
-            stroke-linecap="round"
-          />
-          <path
-            d="M35.6485 287.364C35.6485 298.344 44.5492 307.249 55.534 307.249C66.5137 307.249 75.4194 298.344 75.4194 287.364C75.4194 276.379 66.5137 267.479 55.534 267.479C44.5492 267.479 35.6485 276.379 35.6485 287.364Z"
-            fill="white"
-          />
-          <path
-            d="M143.473 15.2496L143.436 35.3689L142.995 281.162"
-            stroke="#1D1D1B"
-            stroke-width="30.4992"
-            stroke-miterlimit="10"
-            stroke-linecap="round"
-          />
-        </svg>
+      <div class="workspace">
+        <div id="stage" aria-label="Plocha s kladkami">
+          <svg id="rope-layer" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+</div>
       </div>
     </div>
 
