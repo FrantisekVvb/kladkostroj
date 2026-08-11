@@ -32,6 +32,10 @@
 
   const CLOSE_SNAP_RADIUS = 28;
   const END_GRAB_RADIUS = 24;
+  /** Maximální obepnutí — max ~půl + kousek; celý závit ani „přes kladku“ ne. */
+  const MAX_WRAP_TRAVEL = Math.PI + 0.4;
+  /** Minimální obepnutí — jen proti ostrému „V“ zlomu (ne proti platným krátkým obloukům). */
+  const MIN_WRAP_TRAVEL = 0.35;
 
   /** Konec volné tyčky u modré kladky (SVG souřadnice). */
   const FREE_ROD_TIP = { x: 143.473, y: 15.2496 };
@@ -73,7 +77,8 @@
   let forceLayer = null;
   const FORCE_ARROW_SCALE = 0.09;
   const FORCE_ARROW_MIN = 18;
-  const FORCE_ARROW_MAX = 90;
+  const FORCE_ARROW_MAX = 160;
+  const FORCE_ARROW_UNIT_LEN = 44;
 
   function updateClearEnabled() {
     btnClear.disabled = ropes.length === 0;
@@ -354,22 +359,30 @@
 
   /** SVG arc: y roste dolů → sweep=1 je po směru hodin (kladný atan2). */
   function svgArc(wheel, a0, a1, clockwise) {
+    let cw = clockwise;
+    let travel = wrapTravelRaw(a0, a1, cw);
+    // Nikdy neomotat skoro celou kladku — vždy kratší přípustný oblouk.
+    if (Math.abs(travel) > MAX_WRAP_TRAVEL + 1e-6) {
+      const alt = wrapTravelRaw(a0, a1, !cw);
+      if (Math.abs(alt) < Math.abs(travel)) {
+        cw = !cw;
+        travel = alt;
+      }
+    }
+    // Konce zůstávají na a0/a1 (tečny). Travel jen pro SVG flags.
+    if (Math.abs(travel) < 1e-4) {
+      travel = cw ? MIN_WRAP_TRAVEL : -MIN_WRAP_TRAVEL;
+    }
     const p0 = pointOnCircle(wheel, a0);
     const p1 = pointOnCircle(wheel, a1);
 
-    let travel = normalizeAngle(a1 - a0);
-    if (clockwise && travel < 0) travel += 2 * Math.PI;
-    if (!clockwise && travel > 0) travel -= 2 * Math.PI;
-    if (Math.abs(travel) < 1e-6) {
-      travel = clockwise ? 2 * Math.PI : -2 * Math.PI;
-    }
-
     const large = Math.abs(travel) > Math.PI + 1e-6 ? 1 : 0;
-    const sweep = clockwise ? 1 : 0;
+    const sweep = cw ? 1 : 0;
 
     return {
       start: p0,
       end: p1,
+      clockwise: cw,
       d: `L${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A${wheel.r.toFixed(2)} ${wheel.r.toFixed(2)} 0 ${large} ${sweep} ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`,
       travel,
     };
@@ -475,13 +488,14 @@
     const m = bestMidAng;
 
     function arcContains(cw) {
-      const total = travelFor(a, b, cw);
-      const toMid = travelFor(a, m, cw);
+      const total = wrapTravelRaw(a, b, cw);
+      const toMid = wrapTravelRaw(a, m, cw);
+      if (Math.abs(total) < 1e-4) return false;
       if (Math.sign(total) !== Math.sign(toMid) && Math.abs(toMid) > 0.05) {
         return false;
       }
       if (Math.abs(toMid) > Math.abs(total) + 0.1) return false;
-      const fromMid = travelFor(m, b, cw);
+      const fromMid = wrapTravelRaw(m, b, cw);
       if (Math.sign(total) !== Math.sign(fromMid) && Math.abs(fromMid) > 0.05) {
         return false;
       }
@@ -517,9 +531,107 @@
     return dist(a, b) < 4 && Math.abs(a.r - b.r) < 4;
   }
 
+  function segmentClosestDist(p0, p1, wheel) {
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-8) {
+      return Math.hypot(p0.x - wheel.cx, p0.y - wheel.cy);
+    }
+    const t = clamp(
+      ((wheel.cx - p0.x) * dx + (wheel.cy - p0.y) * dy) / lenSq,
+      0,
+      1
+    );
+    return Math.hypot(p0.x + t * dx - wheel.cx, p0.y + t * dy - wheel.cy);
+  }
+
+  /** Úsek jde skrz kladku nebo těsně podél obvodu (má se obepnout, ne obejít). */
+  function segmentTouchesWheel(p0, p1, wheel, pad = 5) {
+    if (segmentPiercesWheel(p0, p1, wheel, 3)) return true;
+    return segmentClosestDist(p0, p1, wheel) < wheel.r + pad;
+  }
+
+  function freeRangesOfStroke(pts, picked) {
+    if (!picked.length) return [{ start: 0, end: pts.length - 1 }];
+    const ranges = [{ start: 0, end: picked[0].start }];
+    for (let i = 0; i < picked.length - 1; i += 1) {
+      ranges.push({ start: picked[i].end, end: picked[i + 1].start });
+    }
+    ranges.push({
+      start: picked[picked.length - 1].end,
+      end: pts.length - 1,
+    });
+    return ranges;
+  }
+
+  function insertWrapEvent(picked, ev) {
+    if (picked.some((p) => sameWheel(p.wheel, ev.wheel))) return false;
+    picked.push(ev);
+    picked.sort((a, b) => a.start - b.start || a.end - b.end);
+    // Znovu ořež překryvy (stejná logika jako při prvním výběru)
+    const cleaned = [];
+    for (const e of picked) {
+      if (cleaned.some((p) => sameWheel(p.wheel, e.wheel))) continue;
+      const last = cleaned[cleaned.length - 1];
+      const next = { ...e };
+      if (last && next.start <= last.end) {
+        if (next.end <= last.end) continue;
+        next.start = last.end;
+        if (next.end - next.start < 1) continue;
+      }
+      cleaned.push(next);
+    }
+    picked.length = 0;
+    for (const e of cleaned) picked.push(e);
+    return true;
+  }
+
+  /**
+   * Když volný úsek míjí neobepnutou kladku, doplň wrap —
+   * jinak lineToAvoidingWheels udělá „V“ s mezerou pod kolem.
+   */
+  function supplementMissedWraps(pts, picked) {
+    const wheels = collectWheels();
+    for (let guard = 0; guard < wheels.length + 2; guard += 1) {
+      let added = false;
+      for (const wheel of wheels) {
+        if (picked.some((p) => sameWheel(p.wheel, wheel))) continue;
+        const ranges = freeRangesOfStroke(pts, picked);
+        for (const range of ranges) {
+          if (range.end - range.start < 1) continue;
+          let hit = false;
+          for (let i = range.start; i < range.end; i += 1) {
+            if (segmentTouchesWheel(pts[i], pts[i + 1], wheel, 6)) {
+              hit = true;
+              break;
+            }
+          }
+          if (!hit) continue;
+          const run = findPiercingSpan(pts, wheel, range.start, range.end);
+          if (!run) continue;
+          const start = Math.max(run.start, range.start);
+          const end = Math.min(run.end, range.end);
+          if (end - start < 1) continue;
+          added = insertWrapEvent(picked, {
+            start,
+            end,
+            wheel,
+            clockwise:
+              wrapDirection(pts, start, end, wheel) === "cw",
+          });
+          if (added) break;
+        }
+        if (added) break;
+      }
+      if (!added) break;
+    }
+  }
+
   function pickWrapEvents(pts) {
     const wheels = collectWheels();
     const events = [];
+
     for (const wheel of wheels) {
       for (const w of findWraps(pts, wheel)) {
         events.push({
@@ -528,22 +640,67 @@
           clockwise: wrapDirection(pts, w.start, w.end, wheel) === "cw",
         });
       }
+      if (!events.some((e) => sameWheel(e.wheel, wheel))) {
+        const run = findPiercingSpan(pts, wheel);
+        if (run) {
+          events.push({
+            start: run.start,
+            end: run.end,
+            wheel,
+            clockwise: wrapDirection(pts, run.start, run.end, wheel) === "cw",
+          });
+        }
+      }
     }
-    events.sort((a, b) => a.start - b.start);
+
+    // Podle pořadí tahu: ke kladce jen první přimknutí, další se zahodí
+    events.sort((a, b) => a.start - b.start || a.end - b.end);
 
     const picked = [];
     for (const ev of events) {
+      if (picked.some((p) => sameWheel(p.wheel, ev.wheel))) continue;
+
       const last = picked[picked.length - 1];
-      // Slučuj jen překryvy na STEJNÉ kladce — jinak zůstanou obě (červená + modrá)
-      if (last && ev.start <= last.end && sameWheel(last.wheel, ev.wheel)) {
-        if (ev.end - ev.start > last.end - last.start) {
-          picked[picked.length - 1] = ev;
-        }
-        continue;
+      if (last && ev.start <= last.end) {
+        if (ev.end <= last.end) continue;
+        ev.start = last.end;
+        if (ev.end - ev.start < 1) continue;
       }
       picked.push(ev);
     }
+
+    supplementMissedWraps(pts, picked);
     return picked;
+  }
+
+  /** Najde úsek tahu, který prochází vnitřkem / těsně podél kladky. */
+  function findPiercingSpan(pts, wheel, fromIdx = 0, toIdx = pts.length - 1) {
+    const lo = Math.max(0, fromIdx);
+    const hi = Math.min(pts.length - 1, toIdx);
+    let first = -1;
+    let last = -1;
+    for (let i = lo; i < hi; i += 1) {
+      if (segmentTouchesWheel(pts[i], pts[i + 1], wheel, 5)) {
+        if (first < 0) first = i;
+        last = i + 1;
+      }
+    }
+    if (first < 0) {
+      const distTo = (p) => Math.hypot(p.x - wheel.cx, p.y - wheel.cy);
+      for (let i = lo; i <= hi; i += 1) {
+        if (distTo(pts[i]) < wheel.r + 4) {
+          if (first < 0) first = i;
+          last = i;
+        }
+      }
+    }
+    if (first < 0) return null;
+    first = Math.max(lo, first - 1);
+    last = Math.min(hi, last + 1);
+    if (last - first < 1) {
+      last = Math.min(hi, first + 1);
+    }
+    return { start: first, end: last };
   }
 
   /**
@@ -631,11 +788,53 @@
     return dist(p0, closest) >= endClear && dist(p1, closest) >= endClear;
   }
 
-  /** Směr oblouku podle směru obepnutí z tahu. */
+  /** Směr oblouku: vybere smysl s přirozeným obepnutím (ne zlom, ne celý kruh). */
   function resolveArcClockwise(enterAng, leaveAng, hintCw) {
-    const hintT = Math.abs(travelFor(enterAng, leaveAng, hintCw));
-    if (hintT >= 0.15) return hintCw;
-    return !hintCw;
+    function absTravel(cw) {
+      let t = Math.abs(wrapTravelRaw(enterAng, leaveAng, cw));
+      if (t < 1e-4) t = 2 * Math.PI;
+      return t;
+    }
+    function ok(t) {
+      return t >= MIN_WRAP_TRAVEL - 1e-6 && t <= MAX_WRAP_TRAVEL + 1e-6;
+    }
+
+    const tHint = absTravel(hintCw);
+    const tAlt = absTravel(!hintCw);
+    if (ok(tHint)) return hintCw;
+    if (ok(tAlt)) return !hintCw;
+    // Kratší oblouk je méně náchylný k celému závitu
+    return tHint <= tAlt ? hintCw : !hintCw;
+  }
+
+  function wrapTravelRaw(a0, a1, clockwise) {
+    let travel = normalizeAngle(a1 - a0);
+    if (clockwise && travel < 0) travel += 2 * Math.PI;
+    if (!clockwise && travel > 0) travel -= 2 * Math.PI;
+    return travel;
+  }
+
+  function travelFor(a0, a1, clockwise) {
+    let travel = wrapTravelRaw(a0, a1, clockwise);
+    // Nikdy celý závit; nenuť minimální oblouk (rozbíjí společné tečny).
+    if (Math.abs(travel) < 1e-4) {
+      travel = clockwise ? MIN_WRAP_TRAVEL : -MIN_WRAP_TRAVEL;
+    } else if (Math.abs(travel) > MAX_WRAP_TRAVEL) {
+      travel = clockwise ? MAX_WRAP_TRAVEL : -MAX_WRAP_TRAVEL;
+    }
+    return travel;
+  }
+
+  /** Omezí výstupní úhel jen proti celému závitu / nulovému zlomu. */
+  function clampWrapLeave(enterAng, leaveAng, clockwise) {
+    let travel = wrapTravelRaw(enterAng, leaveAng, clockwise);
+    const abs = Math.abs(travel);
+    if (abs < 1e-4 || abs < MIN_WRAP_TRAVEL) {
+      travel = clockwise ? MIN_WRAP_TRAVEL : -MIN_WRAP_TRAVEL;
+    } else if (abs > MAX_WRAP_TRAVEL) {
+      travel = clockwise ? MAX_WRAP_TRAVEL : -MAX_WRAP_TRAVEL;
+    }
+    return enterAng + travel;
   }
 
   /**
@@ -657,7 +856,7 @@
       return { a0: base, a1: base + Math.PI };
     }
 
-    let best = candidates[0];
+    let best = null;
     let bestScore = Infinity;
 
     for (const c of candidates) {
@@ -676,22 +875,29 @@
         (tx / len) * Math.cos(enterT) + (ty / len) * Math.sin(enterT);
 
       let score = 0;
+      // Lano nesmí jít skrz kladku — tvrdá penalizace
+      if (segmentPiercesWheel(p0, p1, w0, 3)) score += 5000;
+      if (segmentPiercesWheel(p0, p1, w1, 3)) score += 5000;
+
+      // Tečna musí souhlasit se smyslem obepnutí — jinak ostré „V“ na styku
+      if (alignOut < 0.15) score += 8000;
+      if (alignIn < 0.15) score += 8000;
+
       // Hlavní kritérium: tečna má ležet u nakresleného volného úseku
       if (hintMid) score += distPointToSegment(hintMid, p0, p1) * 3;
       if (hintLeaveAng != null) score += angDist(c.a0, hintLeaveAng) * 25;
       if (hintEnterAng != null) score += angDist(c.a1, hintEnterAng) * 25;
 
-      if (segmentPiercesWheel(p0, p1, w0)) score += 200;
-      if (segmentPiercesWheel(p0, p1, w1)) score += 200;
-
       if (knownEnterAng != null) {
-        const arcT = Math.abs(travelFor(knownEnterAng, c.a0, leaveCw));
-        if (arcT > Math.PI + 0.15) score += 100;
+        const arcT = Math.abs(wrapTravelRaw(knownEnterAng, c.a0, leaveCw));
+        const absT = arcT < 1e-4 ? 2 * Math.PI : arcT;
+        if (absT > MAX_WRAP_TRAVEL) score += 120;
+        if (absT < MIN_WRAP_TRAVEL) score += 40;
       }
 
-      // Soft penalizace za nesoulad smyslu obepnutí
-      score += Math.max(0, 0.4 - alignOut) * 30;
-      score += Math.max(0, 0.4 - alignIn) * 30;
+      // Soft penalizace za slabší soulad
+      score += Math.max(0, 0.85 - alignOut) * 40;
+      score += Math.max(0, 0.85 - alignIn) * 40;
 
       if (score < bestScore) {
         bestScore = score;
@@ -699,17 +905,7 @@
       }
     }
 
-    return { a0: best.a0, a1: best.a1 };
-  }
-
-  function travelFor(a0, a1, clockwise) {
-    let travel = normalizeAngle(a1 - a0);
-    if (clockwise && travel < 0) travel += 2 * Math.PI;
-    if (!clockwise && travel > 0) travel -= 2 * Math.PI;
-    if (Math.abs(travel) < 1e-4) {
-      travel = clockwise ? 2 * Math.PI : -2 * Math.PI;
-    }
-    return travel;
+    return best || candidates[0];
   }
 
   function strokeHintAngle(pts, index, wheel) {
@@ -724,10 +920,523 @@
     return slice[Math.floor(slice.length / 2)];
   }
 
-  function buildRopePath(rawPoints, closed = false) {
+  /** Po spočtení tečen oprav volné úseky, které by šly skrz kladku. */
+  function repairPiercingFreeSegments(wraps, enterAng, leaveAng, pts, closed) {
+    for (let pass = 0; pass < 3; pass += 1) {
+      for (let i = 0; i < wraps.length - 1; i += 1) {
+        const a = wraps[i];
+        const b = wraps[i + 1];
+        const p0 = pointOnCircle(a.wheel, leaveAng[i]);
+        const p1 = pointOnCircle(b.wheel, enterAng[i + 1]);
+        // endClear ≥ 8: pravá tečna na obvodu není „průchod“
+        if (
+          !segmentPiercesWheel(p0, p1, a.wheel, 8) &&
+          !segmentPiercesWheel(p0, p1, b.wheel, 8)
+        ) {
+          continue;
+        }
+        const mid = freeSegmentMid(pts, a.end, b.start);
+        const tang = commonTangentAngles(
+          a.wheel,
+          a.clockwise,
+          b.wheel,
+          b.clockwise,
+          leaveAng[i],
+          enterAng[i + 1],
+          mid,
+          enterAng[i]
+        );
+        leaveAng[i] = tang.a0;
+        enterAng[i + 1] = tang.a1;
+      }
+
+      if (!closed && wraps.length) {
+        const first = wraps[0];
+        const last = wraps[wraps.length - 1];
+        const startPt = pts[0];
+        const endPt = pts[pts.length - 1];
+        let pe = pointOnCircle(first.wheel, enterAng[0]);
+        if (
+          segmentPiercesWheel(startPt, pe, first.wheel, 8) ||
+          segmentCrossesWheel(startPt, pe, first.wheel, 2)
+        ) {
+          first.clockwise = !first.clockwise;
+          enterAng[0] = tangentFromFreePoint(
+            first.wheel,
+            startPt,
+            first.clockwise,
+            true
+          );
+          if (wraps.length === 1) {
+            leaveAng[0] = tangentFromFreePoint(
+              first.wheel,
+              endPt,
+              first.clockwise,
+              false
+            );
+          } else {
+            const mid = freeSegmentMid(pts, first.end, wraps[1].start);
+            const tang = commonTangentAngles(
+              first.wheel,
+              first.clockwise,
+              wraps[1].wheel,
+              wraps[1].clockwise,
+              leaveAng[0],
+              enterAng[1],
+              mid,
+              enterAng[0]
+            );
+            leaveAng[0] = tang.a0;
+            enterAng[1] = tang.a1;
+          }
+        }
+        let pl = pointOnCircle(last.wheel, leaveAng[wraps.length - 1]);
+        if (
+          segmentPiercesWheel(pl, endPt, last.wheel, 8) ||
+          segmentCrossesWheel(pl, endPt, last.wheel, 2)
+        ) {
+          last.clockwise = !last.clockwise;
+          leaveAng[wraps.length - 1] = tangentFromFreePoint(
+            last.wheel,
+            endPt,
+            last.clockwise,
+            false
+          );
+          if (wraps.length === 1) {
+            enterAng[0] = tangentFromFreePoint(
+              last.wheel,
+              startPt,
+              last.clockwise,
+              true
+            );
+          } else {
+            const prev = wraps[wraps.length - 2];
+            const li = wraps.length - 2;
+            const mid = freeSegmentMid(pts, prev.end, last.start);
+            const tang = commonTangentAngles(
+              prev.wheel,
+              prev.clockwise,
+              last.wheel,
+              last.clockwise,
+              leaveAng[li],
+              enterAng[li + 1],
+              mid,
+              enterAng[li]
+            );
+            leaveAng[li] = tang.a0;
+            enterAng[li + 1] = tang.a1;
+          }
+        }
+      }
+    }
+
+    // Jen srovnej smysl proti celému závitu; koncové tečny drž u volných konců.
+    // Neflipuj jen kvůli kratšímu oblouku — to vypadá jako odskok od kladky.
+    if (!closed && wraps.length) {
+      const startPt = pts[0];
+      const endPt = pts[pts.length - 1];
+      for (let i = 0; i < wraps.length; i += 1) {
+        const travel = Math.abs(
+          wrapTravelRaw(enterAng[i], leaveAng[i], wraps[i].clockwise)
+        );
+        if (travel > MAX_WRAP_TRAVEL + 1e-6) {
+          wraps[i].clockwise = !wraps[i].clockwise;
+        }
+      }
+      enterAng[0] = tangentFromFreePoint(
+        wraps[0].wheel,
+        startPt,
+        wraps[0].clockwise,
+        true
+      );
+      leaveAng[wraps.length - 1] = tangentFromFreePoint(
+        wraps[wraps.length - 1].wheel,
+        endPt,
+        wraps[wraps.length - 1].clockwise,
+        false
+      );
+    }
+  }
+
+  /**
+   * True, pokud volný úsek (nebo tětiva) jde skrz disk kladky.
+   * Přísnější než segmentPiercesWheel — chytí i „lano přes kladku“.
+   */
+  function segmentCrossesWheel(p0, p1, wheel, pad = 2) {
+    if (segmentPiercesWheel(p0, p1, wheel, 6)) return true;
+    const d0 = Math.hypot(p0.x - wheel.cx, p0.y - wheel.cy);
+    const d1 = Math.hypot(p1.x - wheel.cx, p1.y - wheel.cy);
+    // Oba body mimo, ale tětiva zasahuje dovnitř disku
+    if (d0 >= wheel.r - 1 && d1 >= wheel.r - 1) {
+      return segmentClosestDist(p0, p1, wheel) < wheel.r - pad;
+    }
+    return false;
+  }
+
+  /**
+   * Body obcházející kladku ZVENKU — jen u kladek, kterých se úsek
+   * nedotýká na koncích (jinak by vzniklo ostré „V“ u tečny).
+   */
+  function freeSegmentDetours(p0, p1, wheels, margin = 10) {
+    const detours = [];
+    let from = { x: p0.x, y: p0.y };
+    for (let guard = 0; guard < 8; guard += 1) {
+      let hit = null;
+      for (const wheel of wheels) {
+        // Jen skutečný průchod diskem — ne tečný kontakt u konce lana
+        if (segmentPiercesWheel(from, p1, wheel, 14)) {
+          hit = wheel;
+          break;
+        }
+      }
+      if (!hit) break;
+
+      const dx = p1.x - from.x;
+      const dy = p1.y - from.y;
+      const lenSq = dx * dx + dy * dy || 1;
+      const t = clamp(
+        ((hit.cx - from.x) * dx + (hit.cy - from.y) * dy) / lenSq,
+        0,
+        1
+      );
+      const closest = { x: from.x + t * dx, y: from.y + t * dy };
+      let ox = closest.x - hit.cx;
+      let oy = closest.y - hit.cy;
+      let od = Math.hypot(ox, oy);
+      if (od < 1e-4) {
+        ox = -dy;
+        oy = dx;
+        od = Math.hypot(ox, oy) || 1;
+      }
+      const need = hit.r + margin;
+      let wp = {
+        x: hit.cx + (ox / od) * need,
+        y: hit.cy + (oy / od) * need,
+      };
+      if (
+        segmentPiercesWheel(from, wp, hit, 8) ||
+        segmentPiercesWheel(wp, p1, hit, 8)
+      ) {
+        wp = {
+          x: hit.cx - (ox / od) * need,
+          y: hit.cy - (oy / od) * need,
+        };
+      }
+      if (segmentPiercesWheel(from, wp, hit, 8)) {
+        wp = {
+          x: hit.cx + (ox / od) * (need + 14),
+          y: hit.cy + (oy / od) * (need + 14),
+        };
+      }
+      detours.push(wp);
+      from = wp;
+    }
+    return detours;
+  }
+
+  function lineToAvoidingWheels(lineTo, from, to, wheels, ignoreWheels = []) {
+    if (!from) {
+      lineTo(to);
+      return to;
+    }
+    const check = wheels.filter(
+      (w) => !ignoreWheels.some((iw) => iw && sameWheel(iw, w))
+    );
+    const detours = freeSegmentDetours(from, to, check);
+    for (const wp of detours) lineTo(wp);
+    lineTo(to);
+    return to;
+  }
+
+  /** Souhlas tečny oblouku se směrem volného úseku (−1…+1). */
+  function tangentAlign(wheel, ang, clockwise, from, to) {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const tAng = clockwise ? ang + Math.PI / 2 : ang - Math.PI / 2;
+    return (dx / len) * Math.cos(tAng) + (dy / len) * Math.sin(tAng);
+  }
+
+  /**
+   * Spočte enter/leave tak, aby volné úseky byly tečné a smysl oblouku
+   * seděl (žádné „V“ na styku).
+   */
+  function solveWrapGeometry(wraps, pts, closed) {
+    const n = wraps.length;
+    const startPt = pts[0];
+    const endPt = pts[pts.length - 1];
+
+    function applyCandidate(cws) {
+      const enterAng = new Array(n);
+      const leaveAng = new Array(n);
+      for (let i = 0; i < n; i += 1) wraps[i].clockwise = cws[i];
+
+      if (!closed) {
+        enterAng[0] = tangentFromFreePoint(
+          wraps[0].wheel,
+          startPt,
+          cws[0],
+          true
+        );
+        leaveAng[n - 1] = tangentFromFreePoint(
+          wraps[n - 1].wheel,
+          endPt,
+          cws[n - 1],
+          false
+        );
+      }
+
+      for (let i = 0; i < n - 1; i += 1) {
+        const a = wraps[i];
+        const b = wraps[i + 1];
+        const tang = commonTangentAngles(
+          a.wheel,
+          cws[i],
+          b.wheel,
+          cws[i + 1],
+          strokeHintAngle(pts, a.end, a.wheel),
+          strokeHintAngle(pts, b.start, b.wheel),
+          freeSegmentMid(pts, a.end, b.start),
+          enterAng[i] ?? null
+        );
+        leaveAng[i] = tang.a0;
+        enterAng[i + 1] = tang.a1;
+      }
+
+      if (closed) {
+        if (n === 1) {
+          const mid = pts[Math.floor(pts.length / 2)];
+          enterAng[0] = tangentFromFreePoint(
+            wraps[0].wheel,
+            mid,
+            cws[0],
+            true
+          );
+          leaveAng[0] = enterAng[0];
+        } else {
+          const a = wraps[n - 1];
+          const b = wraps[0];
+          const tang = commonTangentAngles(
+            a.wheel,
+            cws[n - 1],
+            b.wheel,
+            cws[0],
+            strokeHintAngle(pts, a.end, a.wheel),
+            strokeHintAngle(pts, b.start, b.wheel),
+            freeSegmentMid(pts, a.end, pts.length - 1) ||
+              freeSegmentMid(pts, 0, b.start),
+            null
+          );
+          leaveAng[n - 1] = tang.a0;
+          enterAng[0] = tang.a1;
+        }
+      }
+
+      for (let i = 0; i < n; i += 1) {
+        if (enterAng[i] == null) {
+          enterAng[i] = strokeHintAngle(pts, wraps[i].start, wraps[i].wheel);
+        }
+        if (leaveAng[i] == null) {
+          leaveAng[i] = strokeHintAngle(pts, wraps[i].end, wraps[i].wheel);
+        }
+      }
+
+      let score = 0;
+      for (let i = 0; i < n; i += 1) {
+        const w = wraps[i];
+        const travel = Math.abs(
+          wrapTravelRaw(enterAng[i], leaveAng[i], cws[i])
+        );
+        if (travel < MIN_WRAP_TRAVEL - 1e-6 || travel > MAX_WRAP_TRAVEL + 1e-6) {
+          score -= 5000;
+        } else if (travel > Math.PI + 0.15) {
+          // Mírně nad půlkruhem je OK (volná kladka), skoro celý závit ne
+          score -= (travel - Math.PI) * 8;
+        }
+
+        const enterP = pointOnCircle(w.wheel, enterAng[i]);
+        const leaveP = pointOnCircle(w.wheel, leaveAng[i]);
+
+        let fromP;
+        if (i === 0 && !closed) fromP = startPt;
+        else if (i === 0 && closed) fromP = pointOnCircle(wraps[n - 1].wheel, leaveAng[n - 1]);
+        else fromP = pointOnCircle(wraps[i - 1].wheel, leaveAng[i - 1]);
+
+        let toP;
+        if (i === n - 1 && !closed) toP = endPt;
+        else if (i === n - 1 && closed) toP = pointOnCircle(wraps[0].wheel, enterAng[0]);
+        else toP = pointOnCircle(wraps[i + 1].wheel, enterAng[i + 1]);
+
+        const aIn = tangentAlign(w.wheel, enterAng[i], cws[i], fromP, enterP);
+        const aOut = tangentAlign(w.wheel, leaveAng[i], cws[i], leaveP, toP);
+        score += aIn * 40 + aOut * 40;
+        if (aIn < 0.2) score -= 80;
+        if (aOut < 0.2) score -= 80;
+
+        if (segmentPiercesWheel(fromP, enterP, w.wheel, 8)) score -= 2000;
+        if (segmentPiercesWheel(leaveP, toP, w.wheel, 8)) score -= 2000;
+        if (segmentCrossesWheel(fromP, enterP, w.wheel, 1)) score -= 4000;
+        if (segmentCrossesWheel(leaveP, toP, w.wheel, 1)) score -= 4000;
+      }
+      return { score, enterAng, leaveAng, cws: cws.slice() };
+    }
+
+    // Vyzkoušej kombinace smyslu oblouku (max 2 kladky → 4 varianty)
+    const hint = wraps.map((w) => w.clockwise);
+    let best = null;
+    const limit = Math.min(n, 3);
+    const total = 1 << limit;
+    for (let mask = 0; mask < total; mask += 1) {
+      const cws = hint.slice();
+      for (let i = 0; i < limit; i += 1) {
+        if (mask & (1 << i)) cws[i] = !hint[i];
+      }
+      const cand = applyCandidate(cws);
+      if (!best || cand.score > best.score) best = cand;
+    }
+
+    for (let i = 0; i < n; i += 1) wraps[i].clockwise = best.cws[i];
+    repairPiercingFreeSegments(wraps, best.enterAng, best.leaveAng, pts, closed);
+    return { enterAng: best.enterAng, leaveAng: best.leaveAng };
+  }
+
+  /**
+   * Doplň wrapy pro kladky, kterými by volný úsek / tětiva procházela.
+   */
+  function ensureWrapsAgainstCrossing(pts, wraps) {
+    const wheels = collectWheels();
+    for (let guard = 0; guard < wheels.length + 2; guard += 1) {
+      let added = false;
+
+      // Geometrické volné úseky podle indexů wrapů
+      const anchors = [];
+      if (!wraps.length) {
+        anchors.push({ a: pts[0], b: pts[pts.length - 1], from: 0, to: pts.length - 1 });
+      } else {
+        anchors.push({
+          a: pts[0],
+          b: pts[wraps[0].start],
+          from: 0,
+          to: wraps[0].start,
+        });
+        for (let i = 0; i < wraps.length - 1; i += 1) {
+          anchors.push({
+            a: pts[wraps[i].end],
+            b: pts[wraps[i + 1].start],
+            from: wraps[i].end,
+            to: wraps[i + 1].start,
+          });
+        }
+        anchors.push({
+          a: pts[wraps[wraps.length - 1].end],
+          b: pts[pts.length - 1],
+          from: wraps[wraps.length - 1].end,
+          to: pts.length - 1,
+        });
+      }
+
+      for (const wheel of wheels) {
+        if (wraps.some((w) => sameWheel(w.wheel, wheel))) continue;
+
+        let hitFrom = 0;
+        let hitTo = pts.length - 1;
+        let hit = false;
+
+        for (const seg of anchors) {
+          if (
+            segmentCrossesWheel(seg.a, seg.b, wheel, 1) ||
+            segmentTouchesWheel(seg.a, seg.b, wheel, 4)
+          ) {
+            hit = true;
+            hitFrom = seg.from;
+            hitTo = seg.to;
+            break;
+          }
+        }
+
+        if (!hit) {
+          for (let i = 0; i < pts.length - 1; i += 1) {
+            if (
+              segmentCrossesWheel(pts[i], pts[i + 1], wheel, 1) ||
+              segmentTouchesWheel(pts[i], pts[i + 1], wheel, 4)
+            ) {
+              hit = true;
+              hitFrom = Math.max(0, i - 1);
+              hitTo = Math.min(pts.length - 1, i + 2);
+              break;
+            }
+          }
+        }
+
+        if (!hit) continue;
+
+        const run =
+          findPiercingSpan(pts, wheel, hitFrom, hitTo) || {
+            start: hitFrom,
+            end: Math.max(hitFrom + 1, hitTo),
+          };
+        const start = clamp(run.start, 0, pts.length - 1);
+        const end = clamp(run.end, 0, pts.length - 1);
+        if (end - start < 1) continue;
+
+        added = insertWrapEvent(wraps, {
+          start,
+          end,
+          wheel,
+          clockwise: wrapDirection(pts, start, end, wheel) === "cw",
+        });
+        if (added) break;
+      }
+      if (!added) break;
+    }
+    wraps.sort((a, b) => a.start - b.start || a.end - b.end);
+    return wraps;
+  }
+
+  /**
+   * Lepkavé obepnutí — jednou detekovaná kladka zůstane, i když je kurzor už daleko
+   * (simplify jinak wrap zahodí a lano „odskočí“).
+   */
+  function wrapsFromStickyKinds(pts, stickyKinds) {
+    if (!stickyKinds || !stickyKinds.length) return [];
+    const wheels = collectWheels();
+    const byKind = (kind) =>
+      wheels.find((w) => (w.kind || "") === kind) ||
+      (kind === "fixed" ? wheels[0] : wheels[1]);
+    const out = [];
+    for (const kind of stickyKinds) {
+      const wheel = byKind(kind);
+      if (!wheel) continue;
+      if (out.some((w) => sameWheel(w.wheel, wheel))) continue;
+      const i = out.length;
+      out.push({
+        start: i * 2,
+        end: i * 2 + 1,
+        wheel,
+        clockwise: true,
+      });
+    }
+    return out;
+  }
+
+  function mergeStickyWraps(pts, wraps, stickyKinds) {
+    if (!stickyKinds || !stickyKinds.length) return wraps;
+    const sticky = wrapsFromStickyKinds(pts, stickyKinds);
+    if (!sticky.length) return wraps;
+
+    // Zachovej pořadí sticky; doplň směr z případné detekce
+    for (const s of sticky) {
+      const found = wraps.find((w) => sameWheel(w.wheel, s.wheel));
+      if (found) s.clockwise = found.clockwise;
+    }
+    return sticky;
+  }
+
+  function buildRopePath(rawPoints, closed = false, stickyKinds = null) {
     if (rawPoints.length < 2) return pointsToPolyline(rawPoints);
 
-    let pts = simplify(rawPoints, 1.6);
+    // Jemnější simplify — hrubý maže body u druhé kladky a wrap se ztratí
+    let pts = simplify(rawPoints, 0.9);
     if (pts.length < 2) pts = rawPoints.slice();
 
     if (closed && pts.length >= 3) {
@@ -738,97 +1447,85 @@
       }
     }
 
-    const wraps = pickWrapEvents(pts);
+    let wraps = pickWrapEvents(pts);
+    wraps = ensureWrapsAgainstCrossing(pts, wraps);
+    // Lepkavé kladky mají přednost — nenech wrap zmizet ve vzdálenosti
+    wraps = mergeStickyWraps(pts, wraps, stickyKinds);
+
     if (!wraps.length) {
       const a = pts[0];
       const b = pts[pts.length - 1];
+      // Jen skutečný průchod diskem — ne pouhý dotyk v okolí (to by „přilepilo“ lano)
+      const hitWheel = collectWheels().find((w) =>
+        segmentCrossesWheel(a, b, w, 1)
+      );
+      if (hitWheel) {
+        const cw = wrapDirection(pts, 0, pts.length - 1, hitWheel) === "cw";
+        const useCw = resolveArcClockwise(
+          tangentFromFreePoint(hitWheel, a, cw, true),
+          tangentFromFreePoint(hitWheel, b, cw, false),
+          cw
+        );
+        const e = tangentFromFreePoint(hitWheel, a, useCw, true);
+        const l = tangentFromFreePoint(hitWheel, b, useCw, false);
+        const arc = svgArc(hitWheel, e, l, useCw);
+        const sweep = arc.clockwise ? 1 : 0;
+        const large = Math.abs(arc.travel) > Math.PI + 1e-6 ? 1 : 0;
+        return (
+          `M${a.x.toFixed(2)} ${a.y.toFixed(2)}` +
+          `L${arc.start.x.toFixed(2)} ${arc.start.y.toFixed(2)}` +
+          `A${hitWheel.r.toFixed(2)} ${hitWheel.r.toFixed(2)} 0 ${large} ${sweep} ${arc.end.x.toFixed(2)} ${arc.end.y.toFixed(2)}` +
+          `L${b.x.toFixed(2)} ${b.y.toFixed(2)}`
+        );
+      }
       if (closed) return `M${a.x.toFixed(2)} ${a.y.toFixed(2)} Z`;
       return `M${a.x.toFixed(2)} ${a.y.toFixed(2)} L${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
     }
 
-    const enterAng = new Array(wraps.length);
-    const leaveAng = new Array(wraps.length);
+    let geom = solveWrapGeometry(wraps, pts, closed);
 
-    for (let i = 0; i < wraps.length; i += 1) {
-      const w = wraps[i];
-      if (i === 0 && !closed) {
-        enterAng[i] = tangentFromFreePoint(w.wheel, pts[0], w.clockwise, true);
+    // Po vyřešení: volné úseky nesmí jít skrz cizí kladku
+    {
+      const allWheels = collectWheels();
+      const segs = [];
+      if (!closed) {
+        segs.push({
+          a: pts[0],
+          b: pointOnCircle(wraps[0].wheel, geom.enterAng[0]),
+        });
+        segs.push({
+          a: pointOnCircle(
+            wraps[wraps.length - 1].wheel,
+            geom.leaveAng[wraps.length - 1]
+          ),
+          b: pts[pts.length - 1],
+        });
       }
-      if (i === wraps.length - 1 && !closed) {
-        leaveAng[i] = tangentFromFreePoint(
-          w.wheel,
-          pts[pts.length - 1],
-          w.clockwise,
-          false
-        );
+      for (let i = 0; i < wraps.length - 1; i += 1) {
+        segs.push({
+          a: pointOnCircle(wraps[i].wheel, geom.leaveAng[i]),
+          b: pointOnCircle(wraps[i + 1].wheel, geom.enterAng[i + 1]),
+        });
+      }
+      let needsRetry = false;
+      const extraKinds = stickyKinds ? stickyKinds.slice() : [];
+      for (const seg of segs) {
+        for (const wheel of allWheels) {
+          if (!segmentCrossesWheel(seg.a, seg.b, wheel, 1)) continue;
+          if (wraps.some((w) => sameWheel(w.wheel, wheel))) continue;
+          if (wheel.kind && !extraKinds.includes(wheel.kind)) {
+            extraKinds.push(wheel.kind);
+          }
+          needsRetry = true;
+        }
+      }
+      if (needsRetry) {
+        wraps = mergeStickyWraps(pts, wraps, extraKinds);
+        geom = solveWrapGeometry(wraps, pts, closed);
       }
     }
 
-    for (let i = 0; i < wraps.length - 1; i += 1) {
-      const a = wraps[i];
-      const b = wraps[i + 1];
-      const hintLeave = strokeHintAngle(pts, a.end, a.wheel);
-      const hintEnter = strokeHintAngle(pts, b.start, b.wheel);
-      const mid = freeSegmentMid(pts, a.end, b.start);
-      const tang = commonTangentAngles(
-        a.wheel,
-        a.clockwise,
-        b.wheel,
-        b.clockwise,
-        hintLeave,
-        hintEnter,
-        mid,
-        enterAng[i] ?? null
-      );
-      leaveAng[i] = tang.a0;
-      enterAng[i + 1] = tang.a1;
-    }
-
-    if (closed && wraps.length >= 1) {
-      if (wraps.length === 1) {
-        const mid = pts[Math.floor(pts.length / 2)];
-        enterAng[0] = tangentFromFreePoint(
-          wraps[0].wheel,
-          mid,
-          wraps[0].clockwise,
-          true
-        );
-        leaveAng[0] = enterAng[0];
-      } else {
-        const a = wraps[wraps.length - 1];
-        const b = wraps[0];
-        const hintLeave = strokeHintAngle(pts, a.end, a.wheel);
-        const hintEnter = strokeHintAngle(pts, b.start, b.wheel);
-        const mid = freeSegmentMid(pts, a.end, pts.length - 1) ||
-          freeSegmentMid(pts, 0, b.start);
-        const tang = commonTangentAngles(
-          a.wheel,
-          a.clockwise,
-          b.wheel,
-          b.clockwise,
-          hintLeave,
-          hintEnter,
-          mid
-        );
-        leaveAng[wraps.length - 1] = tang.a0;
-        enterAng[0] = tang.a1;
-      }
-    }
-
-    for (let i = 0; i < wraps.length; i += 1) {
-      const w = wraps[i];
-      if (enterAng[i] == null) {
-        enterAng[i] = strokeHintAngle(pts, w.start, w.wheel);
-      }
-      if (leaveAng[i] == null) {
-        leaveAng[i] = strokeHintAngle(pts, w.end, w.wheel);
-      }
-      w.clockwise = resolveArcClockwise(enterAng[i], leaveAng[i], w.clockwise);
-      if (Math.abs(travelFor(enterAng[i], leaveAng[i], w.clockwise)) < 0.2) {
-        leaveAng[i] =
-          enterAng[i] + (w.clockwise ? Math.PI * 0.8 : -Math.PI * 0.8);
-      }
-    }
+    const { enterAng, leaveAng } = geom;
 
     let d = "";
     let pen = null;
@@ -844,9 +1541,10 @@
 
     function addArc(wheel, a0, a1, clockwise) {
       const arc = svgArc(wheel, a0, a1, clockwise);
+      const cw = arc.clockwise != null ? arc.clockwise : clockwise;
       lineTo(arc.start);
       const large = Math.abs(arc.travel) > Math.PI + 1e-6 ? 1 : 0;
-      const sweep = clockwise ? 1 : 0;
+      const sweep = cw ? 1 : 0;
       d += `A${wheel.r.toFixed(2)} ${wheel.r.toFixed(2)} 0 ${large} ${sweep} ${arc.end.x.toFixed(2)} ${arc.end.y.toFixed(2)}`;
       pen = arc.end;
     }
@@ -872,61 +1570,16 @@
 
   /** Zamrzne geometrii obepnutí — v simulaci se nemění úhly tečen. */
   function computeRopeModel(rope) {
-    let pts = simplify(rope.points, 1.6);
+    let pts = simplify(rope.points, 0.9);
     if (pts.length < 2) pts = rope.points.slice();
 
-    const wraps = pickWrapEvents(pts);
+    let wraps = pickWrapEvents(pts);
+    wraps = ensureWrapsAgainstCrossing(pts, wraps);
+    wraps = mergeStickyWraps(pts, wraps, rope.wrapKinds || null);
+
     if (!wraps.length) return { wraps: [], closed: rope.closed };
 
-    const enterAng = new Array(wraps.length);
-    const leaveAng = new Array(wraps.length);
-
-    for (let i = 0; i < wraps.length; i += 1) {
-      const w = wraps[i];
-      if (i === 0 && !rope.closed) {
-        enterAng[i] = tangentFromFreePoint(w.wheel, pts[0], w.clockwise, true);
-      }
-      if (i === wraps.length - 1 && !rope.closed) {
-        leaveAng[i] = tangentFromFreePoint(
-          w.wheel,
-          pts[pts.length - 1],
-          w.clockwise,
-          false
-        );
-      }
-    }
-
-    for (let i = 0; i < wraps.length - 1; i += 1) {
-      const a = wraps[i];
-      const b = wraps[i + 1];
-      const tang = commonTangentAngles(
-        a.wheel,
-        a.clockwise,
-        b.wheel,
-        b.clockwise,
-        strokeHintAngle(pts, a.end, a.wheel),
-        strokeHintAngle(pts, b.start, b.wheel),
-        freeSegmentMid(pts, a.end, b.start),
-        enterAng[i] ?? null
-      );
-      leaveAng[i] = tang.a0;
-      enterAng[i + 1] = tang.a1;
-    }
-
-    for (let i = 0; i < wraps.length; i += 1) {
-      const w = wraps[i];
-      if (enterAng[i] == null) {
-        enterAng[i] = strokeHintAngle(pts, w.start, w.wheel);
-      }
-      if (leaveAng[i] == null) {
-        leaveAng[i] = strokeHintAngle(pts, w.end, w.wheel);
-      }
-      w.clockwise = resolveArcClockwise(enterAng[i], leaveAng[i], w.clockwise);
-      if (Math.abs(travelFor(enterAng[i], leaveAng[i], w.clockwise)) < 0.2) {
-        leaveAng[i] =
-          enterAng[i] + (w.clockwise ? Math.PI * 0.8 : -Math.PI * 0.8);
-      }
-    }
+    const { enterAng, leaveAng } = solveWrapGeometry(wraps, pts, rope.closed);
 
     const modelWraps = wraps.map((w, i) => ({
       wheelKind: w.wheel.kind || "free",
@@ -946,18 +1599,186 @@
     return wheels[1] || wheels[0] || null;
   }
 
+  /**
+   * Live tečny podle aktuálních pozic kladek — volné úseky nesmí jít skrz disk.
+   * Drží smysl obepnutí z modelu, ale přepočítá společné tečny.
+   */
+  function liveWrapGeometry(model, startPt, endPt) {
+    const n = model.wraps.length;
+    if (!n) return null;
+
+    const wheels = model.wraps.map((w) => resolveModelWheel(w.wheelKind));
+    if (wheels.some((w) => !w)) return null;
+
+    function scoreCws(cws) {
+      const enterAng = new Array(n);
+      const leaveAng = new Array(n);
+
+      if (!model.closed) {
+        enterAng[0] = tangentFromFreePoint(wheels[0], startPt, cws[0], true);
+        leaveAng[n - 1] = tangentFromFreePoint(
+          wheels[n - 1],
+          endPt,
+          cws[n - 1],
+          false
+        );
+      }
+
+      for (let i = 0; i < n - 1; i += 1) {
+        const tang = commonTangentAngles(
+          wheels[i],
+          cws[i],
+          wheels[i + 1],
+          cws[i + 1],
+          model.wraps[i].hintLeaveAng ?? null,
+          model.wraps[i + 1].hintEnterAng ?? null,
+          null,
+          enterAng[i] ?? null
+        );
+        leaveAng[i] = tang.a0;
+        enterAng[i + 1] = tang.a1;
+      }
+
+      if (model.closed) {
+        if (n === 1) {
+          enterAng[0] = model.wraps[0].enterAng;
+          leaveAng[0] = enterAng[0];
+        } else {
+          const tang = commonTangentAngles(
+            wheels[n - 1],
+            cws[n - 1],
+            wheels[0],
+            cws[0],
+            model.wraps[n - 1].hintLeaveAng ?? null,
+            model.wraps[0].hintEnterAng ?? null,
+            null,
+            null
+          );
+          leaveAng[n - 1] = tang.a0;
+          enterAng[0] = tang.a1;
+        }
+      }
+
+      let score = 0;
+      for (let i = 0; i < n; i += 1) {
+        // Drž původní smysl obepnutí — jinak lano „odskočí“ na druhou stranu
+        if (cws[i] === hint[i]) score += 800;
+
+        const travel = Math.abs(
+          wrapTravelRaw(enterAng[i], leaveAng[i], cws[i])
+        );
+        if (travel < MIN_WRAP_TRAVEL - 1e-6 || travel > MAX_WRAP_TRAVEL + 1e-6) {
+          score -= 5000;
+        }
+
+        const enterP = pointOnCircle(wheels[i], enterAng[i]);
+        const leaveP = pointOnCircle(wheels[i], leaveAng[i]);
+        let fromP =
+          i === 0 && !model.closed
+            ? startPt
+            : pointOnCircle(wheels[i === 0 ? n - 1 : i - 1], leaveAng[i === 0 ? n - 1 : i - 1]);
+        let toP =
+          i === n - 1 && !model.closed
+            ? endPt
+            : pointOnCircle(wheels[i === n - 1 ? 0 : i + 1], enterAng[i === n - 1 ? 0 : i + 1]);
+
+        if (i === 0 && model.closed) {
+          fromP = pointOnCircle(wheels[n - 1], leaveAng[n - 1]);
+        }
+        if (i === n - 1 && model.closed) {
+          toP = pointOnCircle(wheels[0], enterAng[0]);
+        }
+
+        score += tangentAlign(wheels[i], enterAng[i], cws[i], fromP, enterP) * 40;
+        score += tangentAlign(wheels[i], leaveAng[i], cws[i], leaveP, toP) * 40;
+
+        if (segmentCrossesWheel(fromP, enterP, wheels[i], 1)) score -= 5000;
+        if (segmentCrossesWheel(leaveP, toP, wheels[i], 1)) score -= 5000;
+
+        // Volný úsek nesmí procházet ani cizí kladkou
+        for (let j = 0; j < n; j += 1) {
+          if (j === i) continue;
+          if (segmentCrossesWheel(fromP, enterP, wheels[j], 1)) score -= 5000;
+          if (segmentCrossesWheel(leaveP, toP, wheels[j], 1)) score -= 5000;
+        }
+      }
+
+      // Mezi kladkami
+      for (let i = 0; i < n - 1; i += 1) {
+        const p0 = pointOnCircle(wheels[i], leaveAng[i]);
+        const p1 = pointOnCircle(wheels[i + 1], enterAng[i + 1]);
+        for (const wheel of wheels) {
+          if (segmentCrossesWheel(p0, p1, wheel, 1)) score -= 5000;
+        }
+      }
+
+      return { score, enterAng, leaveAng, cws: cws.slice(), wheels };
+    }
+
+    const hint = model.wraps.map((w) => w.clockwise);
+    let best = null;
+    const limit = Math.min(n, 3);
+    const total = 1 << limit;
+    for (let mask = 0; mask < total; mask += 1) {
+      const cws = hint.slice();
+      for (let i = 0; i < limit; i += 1) {
+        if (mask & (1 << i)) cws[i] = !hint[i];
+      }
+      const cand = scoreCws(cws);
+      if (!best || cand.score > best.score) best = cand;
+    }
+    return best;
+  }
+
   function wrapAnglesAtEndpoints(model, startPt, endPt, w, wheel, index, count) {
+    const live = liveWrapGeometry(model, startPt, endPt);
+    if (live) {
+      return {
+        enterAng: live.enterAng[index],
+        leaveAng: live.leaveAng[index],
+        clockwise: live.cws[index],
+      };
+    }
+
     let enterAng = w.enterAng;
     let leaveAng = w.leaveAng;
-    if (!model.closed) {
-      if (index === 0) {
-        enterAng = tangentFromFreePoint(wheel, startPt, w.clockwise, true);
+    let cw = w.clockwise;
+
+    if (count > 1) {
+      if (!model.closed) {
+        if (index === 0) {
+          enterAng = tangentFromFreePoint(wheel, startPt, cw, true);
+        }
+        if (index === count - 1) {
+          leaveAng = tangentFromFreePoint(wheel, endPt, cw, false);
+        }
       }
-      if (index === count - 1) {
-        leaveAng = tangentFromFreePoint(wheel, endPt, w.clockwise, false);
-      }
+      return { enterAng, leaveAng, clockwise: cw };
     }
-    return { enterAng, leaveAng };
+
+    function tryCw(useCw) {
+      const e = tangentFromFreePoint(wheel, startPt, useCw, true);
+      const l = tangentFromFreePoint(wheel, endPt, useCw, false);
+      const enterP = pointOnCircle(wheel, e);
+      const leaveP = pointOnCircle(wheel, l);
+      let score = 0;
+      const travel = Math.abs(wrapTravelRaw(e, l, useCw));
+      if (travel < MIN_WRAP_TRAVEL - 1e-6 || travel > MAX_WRAP_TRAVEL + 1e-6) {
+        score -= 5000;
+      }
+      score += tangentAlign(wheel, e, useCw, startPt, enterP) * 50;
+      score += tangentAlign(wheel, l, useCw, leaveP, endPt) * 50;
+      if (segmentCrossesWheel(startPt, enterP, wheel, 1)) score -= 4000;
+      if (segmentCrossesWheel(leaveP, endPt, wheel, 1)) score -= 4000;
+      return { score, enterAng: e, leaveAng: l, clockwise: useCw };
+    }
+
+    if (model.closed) {
+      return { enterAng, leaveAng, clockwise: cw };
+    }
+    const a = tryCw(cw);
+    const b = tryCw(!cw);
+    return b.score > a.score + 0.05 ? b : a;
   }
 
   function measureModelLength(model, startPt, endPt) {
@@ -971,7 +1792,7 @@
       const w = model.wraps[i];
       const wheel = resolveModelWheel(w.wheelKind);
       if (!wheel) continue;
-      const { enterAng, leaveAng } = wrapAnglesAtEndpoints(
+      const { enterAng, leaveAng, clockwise } = wrapAnglesAtEndpoints(
         model,
         startPt,
         endPt,
@@ -983,7 +1804,7 @@
       const arcStart = pointOnCircle(wheel, enterAng);
       const arcEnd = pointOnCircle(wheel, leaveAng);
       len += dist(prev, arcStart);
-      len += Math.abs(travelFor(enterAng, leaveAng, w.clockwise)) * wheel.r;
+      len += Math.abs(travelFor(enterAng, leaveAng, clockwise)) * wheel.r;
       prev = arcEnd;
     }
     len += dist(prev, endPt);
@@ -1038,9 +1859,10 @@
 
     function addArc(wheel, a0, a1, clockwise) {
       const arc = svgArc(wheel, a0, a1, clockwise);
+      const cw = arc.clockwise != null ? arc.clockwise : clockwise;
       lineTo(arc.start);
       const large = Math.abs(arc.travel) > Math.PI + 1e-6 ? 1 : 0;
-      const sweep = clockwise ? 1 : 0;
+      const sweep = cw ? 1 : 0;
       d += `A${wheel.r.toFixed(2)} ${wheel.r.toFixed(2)} 0 ${large} ${sweep} ${arc.end.x.toFixed(2)} ${arc.end.y.toFixed(2)}`;
       pen = arc.end;
     }
@@ -1052,7 +1874,7 @@
       const w = model.wraps[i];
       const wheel = resolveModelWheel(w.wheelKind);
       if (!wheel) continue;
-      const { enterAng, leaveAng } = wrapAnglesAtEndpoints(
+      const { enterAng, leaveAng, clockwise } = wrapAnglesAtEndpoints(
         model,
         startPt,
         endPt,
@@ -1061,7 +1883,7 @@
         i,
         count
       );
-      addArc(wheel, enterAng, leaveAng, w.clockwise);
+      addArc(wheel, enterAng, leaveAng, clockwise);
     }
 
     if (model.closed) {
@@ -1388,14 +2210,36 @@
     };
   }
 
+  /** Počet závaží zavěšených pod daným (včetně něj) — hang řetězec. */
+  function countHangingWeights(root) {
+    if (!root?.el?.isConnected) return 0;
+    let count = 1;
+    for (const w of weights) {
+      if (
+        w !== root &&
+        w.snap.type === "weight" &&
+        w.snap.weight === root &&
+        w.snap.placement === "hang"
+      ) {
+        count += countHangingWeights(w);
+      }
+    }
+    return count;
+  }
+
+  function massOfWeightStack(weight) {
+    return countHangingWeights(weight) * WEIGHT_MASS;
+  }
+
   function freePulleyMass() {
     const rodW = weights.find((w) => w.snap.type === "rod");
-    return PULLEY_MASS + (rodW ? WEIGHT_MASS : 0);
+    if (!rodW) return PULLEY_MASS;
+    return PULLEY_MASS + massOfWeightStack(rodW);
   }
 
   /**
    * Napětí v laně T a zrychlení volných těles z podmínky konstantní délky lana.
-   * Závaží = hmotné body. Modrá kladka má zanedbatelnou hmotnost (+ závaží na tyči).
+   * Závaží = hmotné body. Modrá kladka má zanedbatelnou hmotnost (+ všechna závaží na tyči).
    */
   function computeRopeDynamics(rope, model, startPt, endPt) {
     const startW = weightOnRopeEnd(rope, "start");
@@ -1404,6 +2248,8 @@
       model.wraps.some((w) => w.wheelKind === "free") ||
       ropeWrapsFreeWheel(rope);
     const rodW = weights.find((w) => w.snap.type === "rod");
+    const startMass = startW ? massOfWeightStack(startW) : 0;
+    const endMass = endW ? massOfWeightStack(endW) : 0;
     const pulleyMass = freePulleyMass();
 
     const attach = getRopeAttachmentVectors(model, startPt, endPt);
@@ -1417,15 +2263,15 @@
     let numerator = 0;
     let denominator = 0;
 
-    if (startW) {
-      const Fg = { x: 0, y: WEIGHT_MASS * GRAVITY };
-      numerator += vecDot(grad.start, Fg) / WEIGHT_MASS;
-      denominator += vecDot(grad.start, attach.startU) / WEIGHT_MASS;
+    if (startW && startMass > 1e-8) {
+      const Fg = { x: 0, y: startMass * GRAVITY };
+      numerator += vecDot(grad.start, Fg) / startMass;
+      denominator += vecDot(grad.start, attach.startU) / startMass;
     }
-    if (endW) {
-      const Fg = { x: 0, y: WEIGHT_MASS * GRAVITY };
-      numerator += vecDot(grad.end, Fg) / WEIGHT_MASS;
-      denominator += vecDot(grad.end, attach.endU) / WEIGHT_MASS;
+    if (endW && endMass > 1e-8) {
+      const Fg = { x: 0, y: endMass * GRAVITY };
+      numerator += vecDot(grad.end, Fg) / endMass;
+      denominator += vecDot(grad.end, attach.endU) / endMass;
     }
     if (hasFree && pulleyMass > 1e-8) {
       const Fg = { x: 0, y: pulleyMass * GRAVITY };
@@ -1450,24 +2296,24 @@
       pulley: { x: 0, y: 0 },
     };
 
-    if (startW) {
+    if (startW && startMass > 1e-8) {
       netForce.start = {
         x: tension * attach.startU.x,
-        y: WEIGHT_MASS * GRAVITY + tension * attach.startU.y,
+        y: startMass * GRAVITY + tension * attach.startU.y,
       };
       accel.start = {
-        x: netForce.start.x / WEIGHT_MASS,
-        y: netForce.start.y / WEIGHT_MASS,
+        x: netForce.start.x / startMass,
+        y: netForce.start.y / startMass,
       };
     }
-    if (endW) {
+    if (endW && endMass > 1e-8) {
       netForce.end = {
         x: tension * attach.endU.x,
-        y: WEIGHT_MASS * GRAVITY + tension * attach.endU.y,
+        y: endMass * GRAVITY + tension * attach.endU.y,
       };
       accel.end = {
-        x: netForce.end.x / WEIGHT_MASS,
-        y: netForce.end.y / WEIGHT_MASS,
+        x: netForce.end.x / endMass,
+        y: netForce.end.y / endMass,
       };
     }
     if (hasFree) {
@@ -1483,7 +2329,17 @@
       }
     }
 
-    return { tension, accel, netForce, attach, pulleyMass, pulleyU, rodW };
+    return {
+      tension,
+      accel,
+      netForce,
+      attach,
+      pulleyMass,
+      pulleyU,
+      rodW,
+      startMass,
+      endMass,
+    };
   }
 
   /** Stav lana pro výpočet sil — i mimo simulaci. */
@@ -1538,7 +2394,13 @@
   function scaleForceArrow(fx, fy) {
     const mag = Math.hypot(fx, fy);
     if (mag < 1e-6) return null;
-    const len = clamp(mag * FORCE_ARROW_SCALE, FORCE_ARROW_MIN, FORCE_ARROW_MAX);
+    // Délka podle násobku tíhy jednoho závaží — stack 2×/3× se vizuálně prodlouží
+    const unit = WEIGHT_MASS * GRAVITY;
+    const len = clamp(
+      (mag / unit) * FORCE_ARROW_UNIT_LEN,
+      FORCE_ARROW_MIN,
+      FORCE_ARROW_MAX
+    );
     return {
       x: (fx / mag) * len,
       y: (fy / mag) * len,
@@ -1610,10 +2472,14 @@
       if (startW) {
         const origin = getWeightHookWorld(startW);
         const gx = 0;
-        const gy = WEIGHT_MASS * GRAVITY;
+        const gy = dyn.startMass * GRAVITY;
         const tx = T * dyn.attach.startU.x;
         const ty = T * dyn.attach.startU.y;
-        drawForceArrow(origin, gx, gy, "gravity", "G");
+        const gLabel =
+          dyn.startMass > WEIGHT_MASS + 1e-8
+            ? `G×${Math.round(dyn.startMass / WEIGHT_MASS)}`
+            : "G";
+        drawForceArrow(origin, gx, gy, "gravity", gLabel);
         drawForceArrow(origin, tx, ty, "tension", "T");
         drawForceArrow(origin, gx + tx, gy + ty, "net", "Σ");
       }
@@ -1621,10 +2487,14 @@
       if (endW) {
         const origin = getWeightHookWorld(endW);
         const gx = 0;
-        const gy = WEIGHT_MASS * GRAVITY;
+        const gy = dyn.endMass * GRAVITY;
         const tx = T * dyn.attach.endU.x;
         const ty = T * dyn.attach.endU.y;
-        drawForceArrow(origin, gx, gy, "gravity", "G");
+        const gLabel =
+          dyn.endMass > WEIGHT_MASS + 1e-8
+            ? `G×${Math.round(dyn.endMass / WEIGHT_MASS)}`
+            : "G";
+        drawForceArrow(origin, gx, gy, "gravity", gLabel);
         drawForceArrow(origin, tx, ty, "tension", "T");
         drawForceArrow(origin, gx + tx, gy + ty, "net", "Σ");
       }
@@ -1639,8 +2509,12 @@
         const t1y = T * -dyn.attach.freeEnterU.y;
         const t2x = T * dyn.attach.freeLeaveU.x;
         const t2y = T * dyn.attach.freeLeaveU.y;
+        const gLabel =
+          dyn.pulleyMass > WEIGHT_MASS + 1e-8
+            ? `G×${Math.round(dyn.pulleyMass / WEIGHT_MASS)}`
+            : "G";
         if (dyn.pulleyMass > 1e-8) {
-          drawForceArrow(origin, gx, gy, "gravity", "G");
+          drawForceArrow(origin, gx, gy, "gravity", gLabel);
         }
         drawForceArrow(origin, t1x, t1y, "tension", "T₁");
         drawForceArrow(origin, t2x, t2y, "tension", "T₂");
@@ -1654,7 +2528,7 @@
 
         if (rodW) {
           const hook = getWeightHookWorld(rodW);
-          drawForceArrow(hook, gx, gy, "gravity", "G");
+          drawForceArrow(hook, gx, gy, "gravity", gLabel);
           drawForceArrow(
             hook,
             gx + t1x + t2x,
@@ -2186,8 +3060,8 @@
     return left.concat(right);
   }
 
-  function commitRope(el, points, closed, edgeSnap) {
-    const d = buildRopePath(points, closed);
+  function commitRope(el, points, closed, edgeSnap, stickyKinds) {
+    const d = buildRopePath(points, closed, stickyKinds || null);
     el.classList.remove("is-draft", "is-snapping");
     el.setAttribute("d", d);
     if (closed) el.dataset.closed = "true";
@@ -2195,13 +3069,33 @@
 
     const existing = ropes.find((r) => r.el === el);
     const nextEdge = edgeSnap || { start: null, end: null };
+    const draft = {
+      el,
+      points,
+      closed,
+      edgeSnap: nextEdge,
+      wrapKinds: stickyKinds ? stickyKinds.slice() : [],
+    };
+    const model = computeRopeModel(draft);
+    const wrapKinds =
+      stickyKinds && stickyKinds.length
+        ? stickyKinds.slice()
+        : model.wraps.map((w) => w.wheelKind);
+
     if (existing) {
       existing.points = points;
       existing.closed = closed;
+      existing.wrapKinds = wrapKinds;
       if (edgeSnap) existing.edgeSnap = nextEdge;
       else ensureRopeEdgeSnap(existing);
     } else {
-      ropes.push({ el, points, closed, edgeSnap: nextEdge });
+      ropes.push({
+        el,
+        points,
+        closed,
+        edgeSnap: nextEdge,
+        wrapKinds,
+      });
     }
     syncRopeCount();
     syncRopeEndHandles();
@@ -2253,7 +3147,7 @@
     if (w) w.snap = { type: "free" };
     rope.edgeSnap[which] = { edge: snap.edge, along: clampEdgeAlong(snap.edge, snap.along) };
     syncRopeEdgePoint(rope, which);
-    rope.el.setAttribute("d", buildRopePath(rope.points, rope.closed));
+    rebuildRope(rope);
     if (handleEl) {
       const pt = getRopeEndPoint(rope, which);
       handleEl.setAttribute("cx", pt.x.toFixed(2));
@@ -2273,7 +3167,7 @@
     } else {
       rope.points[rope.points.length - 1] = { x: point.x, y: point.y };
     }
-    rope.el.setAttribute("d", buildRopePath(rope.points, rope.closed));
+    rebuildRope(rope);
     if (handleEl) {
       handleEl.setAttribute("cx", point.x.toFixed(2));
       handleEl.setAttribute("cy", point.y.toFixed(2));
@@ -2404,6 +3298,8 @@
     let attachFrom = null;
     /** @type {null | { edge: string, along: number }} */
     let startEdgeSnap = null;
+    /** @type {string[]} kladky, kterých se tah už dotkl — zůstanou i daleko */
+    let stickyKinds = [];
 
     function stagePoint(e) {
       const { rect } = stageSize();
@@ -2415,9 +3311,19 @@
       return concatPoints(attachFrom.rope, attachFrom.which, points);
     }
 
+    function rememberStickyFromPoints(pts) {
+      let wraps = pickWrapEvents(simplify(pts, 0.9));
+      wraps = ensureWrapsAgainstCrossing(simplify(pts, 0.9), wraps);
+      for (const w of wraps) {
+        const kind = w.wheel && w.wheel.kind;
+        if (kind && !stickyKinds.includes(kind)) stickyKinds.push(kind);
+      }
+    }
+
     function updateDraft() {
       if (!draft) return;
       const pts = effectivePoints();
+      rememberStickyFromPoints(pts);
       const selfClose =
         !attachFrom &&
         pts.length >= 4 &&
@@ -2432,7 +3338,7 @@
       if (selfClose) {
         showSnapMarker(pts[0]);
         draft.classList.add("is-snapping");
-        draft.setAttribute("d", buildRopePath(pts, true));
+        draft.setAttribute("d", buildRopePath(pts, true, stickyKinds));
       } else if (endSnap) {
         showSnapMarker(endSnap.point);
         draft.classList.add("is-snapping");
@@ -2441,7 +3347,7 @@
           x: endSnap.point.x,
           y: endSnap.point.y,
         };
-        draft.setAttribute("d", buildRopePath(preview, false));
+        draft.setAttribute("d", buildRopePath(preview, false, stickyKinds));
       } else if (endEdgeSnap) {
         showSnapMarker(endEdgeSnap.point);
         draft.classList.add("is-snapping");
@@ -2450,11 +3356,11 @@
           x: endEdgeSnap.point.x,
           y: endEdgeSnap.point.y,
         };
-        draft.setAttribute("d", buildRopePath(preview, false));
+        draft.setAttribute("d", buildRopePath(preview, false, stickyKinds));
       } else {
         hideSnapMarker();
         draft.classList.remove("is-snapping");
-        draft.setAttribute("d", buildRopePath(pts, false));
+        draft.setAttribute("d", buildRopePath(pts, false, stickyKinds));
       }
     }
 
@@ -2464,9 +3370,13 @@
       syncRopeViewBox();
       const p = stagePoint(e);
       startEdgeSnap = null;
+      stickyKinds = [];
       attachFrom = findSnapTarget(p, null);
       if (attachFrom) {
         points = [{ x: attachFrom.point.x, y: attachFrom.point.y }];
+        if (attachFrom.rope.wrapKinds) {
+          stickyKinds = attachFrom.rope.wrapKinds.slice();
+        }
       } else {
         const edgeSnap = findEdgeSnapTarget(p);
         if (edgeSnap) {
@@ -2520,6 +3430,7 @@
         points = [];
         attachFrom = null;
         startEdgeSnap = null;
+        stickyKinds = [];
         return;
       }
 
@@ -2550,9 +3461,20 @@
       if (selfClose) {
         pts[pts.length - 1] = { x: pts[0].x, y: pts[0].y };
         closed = true;
-        commitRope(draft, pts, true);
+        commitRope(draft, pts, true, null, stickyKinds);
       } else if (endSnap) {
         ensureRopeEdgeSnap(endSnap.rope);
+        rememberStickyFromPoints(pts);
+        if (endSnap.rope.wrapKinds) {
+          for (const k of endSnap.rope.wrapKinds) {
+            if (!stickyKinds.includes(k)) stickyKinds.push(k);
+          }
+        }
+        if (attachFrom && attachFrom.rope.wrapKinds) {
+          for (const k of attachFrom.rope.wrapKinds) {
+            if (!stickyKinds.includes(k)) stickyKinds.push(k);
+          }
+        }
         const otherEdgeSnap = endSnap.rope.edgeSnap;
         pts = concatPoints(
           { points: pts, closed: false },
@@ -2573,14 +3495,22 @@
         } else {
           mergedEdge = {
             start: startEdgeSnap,
-            end: endSnap.which === "end" ? otherEdgeSnap.start : otherEdgeSnap.end,
+            end:
+              endSnap.which === "end"
+                ? otherEdgeSnap.start
+                : otherEdgeSnap.end,
           };
         }
         removeRope(endSnap.rope);
         if (attachFrom) removeRope(attachFrom.rope);
-        commitRope(draft, pts, false, mergedEdge);
+        commitRope(draft, pts, false, mergedEdge, stickyKinds);
       } else if (attachFrom) {
         ensureRopeEdgeSnap(attachFrom.rope);
+        if (attachFrom.rope.wrapKinds) {
+          for (const k of attachFrom.rope.wrapKinds) {
+            if (!stickyKinds.includes(k)) stickyKinds.push(k);
+          }
+        }
         edgeSnap.start = attachFrom.rope.edgeSnap.start;
         if (attachFrom.which === "start") {
           edgeSnap.end = endEdgeSnap
@@ -2592,15 +3522,16 @@
             : attachFrom.rope.edgeSnap.end;
         }
         removeRope(attachFrom.rope);
-        commitRope(draft, pts, false, edgeSnap);
+        commitRope(draft, pts, false, edgeSnap, stickyKinds);
       } else {
-        commitRope(draft, pts, false, edgeSnap);
+        commitRope(draft, pts, false, edgeSnap, stickyKinds);
       }
 
       draft = null;
       points = [];
       attachFrom = null;
       startEdgeSnap = null;
+      stickyKinds = [];
     }
 
     ropeLayer.addEventListener("pointerup", finish);
@@ -2622,6 +3553,7 @@
       const top = clamp(clientY - rect.top - offsetY, 0, maxTop);
       el.style.left = `${left}px`;
       el.style.top = `${top}px`;
+      rebuildAllRopes();
       syncAllWeightsToSnap();
       updateForceArrows();
     }
@@ -2709,6 +3641,7 @@
       el.style.top = `${top}px`;
       el.style.transform = `rotate(${EDGE_ROTATION[nextEdge]}deg)`;
       el.dataset.edge = nextEdge;
+      rebuildAllRopes();
     }
 
     function nearestEdge(x, y) {
@@ -2849,15 +3782,34 @@
   }
 
   function rebuildRope(rope) {
+    syncRopeEdgePoints(rope);
     if (running && rope.sim) {
       rope.el.setAttribute(
         "d",
         buildRopeFromModel(rope.sim.model, rope.sim.startPt, rope.sim.endPt)
       );
-    } else {
-      syncRopeEdgePoints(rope);
-      rope.el.setAttribute("d", buildRopePath(rope.points, rope.closed));
+      return;
     }
+
+    const startPt = getRopeEndPoint(rope, "start");
+    const endPt = getRopeEndPoint(rope, "end");
+    const model = computeRopeModel(rope);
+
+    if (model.wraps.length && !rope.closed) {
+      const live = liveWrapGeometry(model, startPt, endPt);
+      if (live) {
+        for (let i = 0; i < model.wraps.length; i += 1) {
+          model.wraps[i].clockwise = live.cws[i];
+          model.wraps[i].enterAng = live.enterAng[i];
+          model.wraps[i].leaveAng = live.leaveAng[i];
+        }
+      }
+      rope.wrapKinds = model.wraps.map((w) => w.wheelKind);
+      rope.el.setAttribute("d", buildRopeFromModel(model, startPt, endPt));
+      return;
+    }
+
+    rope.el.setAttribute("d", buildRopePath(rope.points, rope.closed));
   }
 
   function rebuildAllRopes() {
