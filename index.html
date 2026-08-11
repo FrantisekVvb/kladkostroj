@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>Kladkostroj</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #ffffff;
+        overflow: hidden;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+
+      #stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        background: #ffffff;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      #stage[data-tool="pencil"] {
+        cursor: crosshair;
+      }
+
+      #stage[data-tool="pencil"] .pulley {
+        pointer-events: none;
+      }
+
+      .toolbar {
+        position: absolute;
+        z-index: 20;
+        top: max(12px, env(safe-area-inset-top, 0px));
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 8px;
+        padding: 6px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+      }
+
+      .toolbar button {
+        appearance: none;
+        border: 1px solid transparent;
+        background: transparent;
+        color: #0f172a;
+        font: inherit;
+        font-size: 0.88rem;
+        font-weight: 600;
+        padding: 8px 14px;
+        border-radius: 999px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .toolbar button:hover {
+        background: #f1f5f9;
+      }
+
+      .toolbar button.is-active {
+        background: #0f172a;
+        color: #fff;
+      }
+
+      .toolbar button:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      .pulley {
+        position: absolute;
+        z-index: 2;
+        cursor: grab;
+        touch-action: none;
+        line-height: 0;
+      }
+
+      .pulley:active,
+      .pulley.is-dragging {
+        cursor: grabbing;
+        z-index: 10;
+      }
+
+      .pulley svg {
+        display: block;
+        pointer-events: none;
+        max-width: none;
+        height: auto;
+      }
+
+      .pulley--fixed {
+        transform-origin: 50% 0%;
+        will-change: transform;
+      }
+
+      .pulley--fixed svg {
+        width: 112px;
+      }
+
+      .pulley--free {
+        transform: rotate(180deg);
+        transform-origin: 50% 50%;
+      }
+
+      .pulley--free svg {
+        width: 104px;
+      }
+
+      .weight {
+        position: absolute;
+        z-index: 3;
+        cursor: grab;
+        touch-action: none;
+        line-height: 0;
+      }
+
+      .weight:active,
+      .weight.is-dragging {
+        cursor: grabbing;
+        z-index: 11;
+      }
+
+      .weight svg {
+        display: block;
+        pointer-events: none;
+        width: 70px;
+        height: auto;
+      }
+
+      .weight.is-snapping {
+        filter: drop-shadow(0 0 0 #58a1ff);
+        outline: 2px dashed #58a1ff;
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+
+      #stage[data-tool="pencil"] .weight {
+        pointer-events: none;
+      }
+
+      #stage[data-tool="run"] .pulley,
+      #stage[data-tool="run"] .weight,
+      #stage[data-tool="run"] #rope-layer {
+        pointer-events: none;
+        cursor: default;
+      }
+
+      .toolbar button.is-run {
+        background: #16a34a;
+        color: #fff;
+      }
+
+      .toolbar button.is-run:hover {
+        background: #15803d;
+      }
+
+      #rope-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        pointer-events: none;
+      }
+
+      #stage[data-tool="pencil"] #rope-layer {
+        pointer-events: auto;
+        touch-action: none;
+      }
+
+      .rope-path {
+        fill: none;
+        stroke: #1d1d1b;
+        stroke-width: 6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .rope-path.is-draft {
+        stroke: #64748b;
+        stroke-width: 5;
+        opacity: 0.8;
+      }
+
+      .rope-path.is-draft.is-snapping {
+        stroke: #0f172a;
+        opacity: 1;
+      }
+
+      #stage[data-tool="move"] {
+        cursor: default;
+      }
+
+      #stage[data-tool="move"] #rope-layer .rope-end-handle {
+        pointer-events: auto;
+        touch-action: none;
+      }
+
+      .rope-end-handle {
+        fill: rgba(88, 161, 255, 0.22);
+        stroke: #58a1ff;
+        stroke-width: 2;
+        cursor: grab;
+        pointer-events: none;
+      }
+
+      .rope-end-handle.is-dragging {
+        cursor: grabbing;
+        fill: rgba(88, 161, 255, 0.42);
+      }
+
+      .rope-end-handle.is-snapping {
+        fill: rgba(15, 23, 42, 0.18);
+        stroke: #0f172a;
+      }
+
+      .rope-snap {
+        fill: none;
+        stroke: #58a1ff;
+        stroke-width: 2;
+        stroke-dasharray: 4 4;
+        pointer-events: none;
+      }
+
+      #force-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 15;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        pointer-events: none;
+      }
+
+      .force-arrow {
+        pointer-events: none;
+      }
+
+      .force-arrow-shaft {
+        fill: none;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+      }
+
+      .force-arrow-head {
+        stroke-width: 0;
+      }
+
+      .force-arrow.is-gravity .force-arrow-shaft,
+      .force-arrow.is-gravity .force-arrow-head {
+        stroke: #c2410c;
+        fill: #c2410c;
+      }
+
+      .force-arrow.is-tension .force-arrow-shaft,
+      .force-arrow.is-tension .force-arrow-head {
+        stroke: #2563eb;
+        fill: #2563eb;
+      }
+
+      .force-arrow.is-net .force-arrow-shaft,
+      .force-arrow.is-net .force-arrow-head {
+        stroke: #15803d;
+        fill: #15803d;
+      }
+
+      .force-arrow-label {
+        font: 600 11px/1 ui-sans-serif, system-ui, sans-serif;
+        fill: #334155;
+        paint-order: stroke;
+        stroke: #fff;
+        stroke-width: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage" data-tool="move" aria-label="Plocha s kladkami">
+      <div class="toolbar" role="toolbar" aria-label="Nástroje">
+        <button type="button" id="tool-move" class="is-active" aria-pressed="true">
+          Přesun
+        </button>
+        <button type="button" id="tool-pencil" aria-pressed="false">
+          Tužka
+        </button>
+        <button type="button" id="tool-run" aria-pressed="false">
+          Spustit
+        </button>
+        <button type="button" id="tool-clear" disabled>Smazat lano</button>
+      </div>
+
+      <svg id="rope-layer" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+
+      <div
+        class="pulley pulley--fixed"
+        id="fixed-pulley"
+        role="img"
+        aria-label="Pevná kladka"
+        style="left: 18%; top: 16%"
+      >
+        <svg
+          width="276"
+          height="315"
+          viewBox="0 0 276 315"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M10.5898 176.404C10.5898 246.683 67.5605 303.654 137.839 303.654C208.118 303.654 265.089 246.683 265.089 176.404C265.089 106.125 208.118 49.1548 137.839 49.1548C67.5605 49.1548 10.5898 106.125 10.5898 176.404Z"
+            fill="#F03B50"
+          />
+          <path
+            d="M10.5898 176.404C10.5898 246.683 67.5605 303.654 137.839 303.654C208.118 303.654 265.089 246.683 265.089 176.404C265.089 106.125 208.118 49.1548 137.839 49.1548C67.5605 49.1548 10.5898 106.125 10.5898 176.404Z"
+            stroke="#F03B50"
+            stroke-width="21.18"
+            stroke-miterlimit="10"
+            stroke-linecap="round"
+          />
+          <path
+            d="M139.912 248.413V291.723"
+            stroke="white"
+            stroke-width="21.18"
+            stroke-miterlimit="10"
+            stroke-linecap="round"
+          />
+          <path
+            d="M96.3086 10.5898V174.982C96.3086 198.036 115 216.728 138.058 216.728C161.112 216.728 179.8 198.036 179.8 174.982V10.5898"
+            fill="#1D1D1B"
+          />
+          <path
+            d="M96.3086 10.5898V174.982C96.3086 198.036 115 216.728 138.058 216.728C161.112 216.728 179.8 198.036 179.8 174.982V10.5898"
+            stroke="#1D1D1B"
+            stroke-width="21.18"
+            stroke-miterlimit="10"
+            stroke-linecap="round"
+          />
+        </svg>
+      </div>
+
+      <div
+        class="pulley pulley--free"
+        id="free-pulley"
+        role="img"
+        aria-label="Volná kladka"
+        style="left: 58%; top: 28%"
+      >
+        <svg
+          width="282"
+          height="434"
+          viewBox="0 0 282 434"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M15.2495 292.717C15.2495 223.382 71.4595 167.177 140.789 167.177C210.124 167.177 266.329 223.382 266.329 292.717C266.329 362.052 210.124 418.257 140.789 418.257C71.4595 418.257 15.2495 362.052 15.2495 292.717Z"
+            fill="#58A1FF"
+          />
+          <path
+            d="M15.2495 292.717C15.2495 223.382 71.4595 167.177 140.789 167.177C210.124 167.177 266.329 223.382 266.329 292.717C266.329 362.052 210.124 418.257 140.789 418.257C71.4595 418.257 15.2495 362.052 15.2495 292.717Z"
+            stroke="#58A1FF"
+            stroke-width="30.4992"
+            stroke-miterlimit="10"
+            stroke-linecap="round"
+          />
+          <path
+            d="M35.6485 287.364C35.6485 298.344 44.5492 307.249 55.534 307.249C66.5137 307.249 75.4194 298.344 75.4194 287.364C75.4194 276.379 66.5137 267.479 55.534 267.479C44.5492 267.479 35.6485 276.379 35.6485 287.364Z"
+            fill="white"
+          />
+          <path
+            d="M143.473 15.2496L143.436 35.3689L142.995 281.162"
+            stroke="#1D1D1B"
+            stroke-width="30.4992"
+            stroke-miterlimit="10"
+            stroke-linecap="round"
+          />
+        </svg>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
