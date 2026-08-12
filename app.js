@@ -101,12 +101,12 @@
     return `${WEIGHT_SVG}<span class="weight-label" aria-hidden="true">${WEIGHT_LABEL_TEXT}</span>`;
   }
 
-  const WINCH_SVG = `<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M49.6989 80.4041C66.6555 80.4041 80.4015 66.6581 80.4015 49.7015C80.4015 32.745 66.6555 18.999 49.6989 18.999C32.7423 18.999 18.9963 32.745 18.9963 49.7015C18.9963 66.6581 32.7423 80.4041 49.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.7016 85.4031C69.419 85.4031 85.4032 69.419 85.4032 49.7016C85.4032 29.9841 69.419 14 49.7016 14C29.9841 14 14 29.9841 14 49.7016C14 69.419 29.9841 85.4031 49.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M82.2331 49.7016C82.2331 67.665 67.6701 82.2335 49.7012 82.2335C31.7323 82.2335 17.1693 67.6705 17.1693 49.7016C17.1693 31.7327 31.7323 17.1697 49.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M22.9513 49.7234H76.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M30.7767 30.8317L68.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M68.5548 30.8317L30.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M24.8699 39.7641L74.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M59.614 24.9374L39.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.1691 25.1571L60.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M74.2219 39.2367L25.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="50" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/></svg>`;
+  const WINCH_SVG = `<svg width="134" height="132" viewBox="0 0 134 132" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0.5" y="48.5" width="133" height="83" fill="#D9D9D9" stroke="black"/><circle cx="67" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M66.6989 80.4041C83.6555 80.4041 97.4015 66.6581 97.4015 49.7015C97.4015 32.745 83.6555 18.999 66.6989 18.999C49.7423 18.999 35.9963 32.745 35.9963 49.7015C35.9963 66.6581 49.7423 80.4041 66.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.7016 85.4031C86.419 85.4031 102.403 69.419 102.403 49.7016C102.403 29.9841 86.419 14 66.7016 14C46.9841 14 31 29.9841 31 49.7016C31 69.419 46.9841 85.4031 66.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M99.2331 49.7016C99.2331 67.665 84.6701 82.2335 66.7012 82.2335C48.7323 82.2335 34.1693 67.6705 34.1693 49.7016C34.1693 31.7327 48.7323 17.1697 66.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.9513 49.7234H93.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M47.7767 30.8317L85.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M85.5548 30.8317L47.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M41.8699 39.7641L91.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M76.614 24.9374L56.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M56.1691 25.1571L77.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M91.2219 39.2367L42.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="67" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/><text class="winch-force-text" x="67" y="119.5" text-anchor="middle" dominant-baseline="central" fill="#4A43E8" font-size="15" font-weight="700" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"></text></svg>`;
 
   const WINCH = {
-    vbW: 100,
+    vbW: 134,
     /** Úchyt lana — horní bod bubnu. */
-    hookX: 50,
+    hookX: 67,
     hookY: 14,
   };
 
@@ -1600,8 +1600,8 @@
   function placeWinchAtHook(winch, point) {
     const { width, height } = stageSize();
     const off = getWinchHookOffset(winch);
-    const w = winch.el.offsetWidth || 80;
-    const h = winch.el.offsetHeight || 80;
+    const w = winch.el.offsetWidth || 100;
+    const h = winch.el.offsetHeight || 98;
     const left = clamp(point.x - off.x, 0, Math.max(0, width - w));
     const top = clamp(point.y - off.y, 0, Math.max(0, height - h));
     winch.el.style.left = `${left}px`;
@@ -4407,12 +4407,23 @@
   }
 
   function ensureWinchForceLabel(winch) {
-    let label = winch.el.querySelector(".winch-force-label");
-    if (!label) {
-      label = document.createElement("div");
-      label.className = "winch-force-label";
-      label.hidden = true;
-      winch.el.appendChild(label);
+    const svg = winch.el.querySelector("svg");
+    let label = winch.el.querySelector(".winch-force-text");
+    if (!label && svg) {
+      label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.classList.add("winch-force-text");
+      label.setAttribute("x", "67");
+      label.setAttribute("y", "119.5");
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("dominant-baseline", "central");
+      label.setAttribute("fill", "#4A43E8");
+      label.setAttribute("font-size", "15");
+      label.setAttribute("font-weight", "700");
+      label.setAttribute(
+        "font-family",
+        "ui-sans-serif, system-ui, -apple-system, sans-serif"
+      );
+      svg.appendChild(label);
     }
     return label;
   }
@@ -4420,20 +4431,23 @@
   function updateWinchForceLabels() {
     for (const winch of winches) {
       const label = ensureWinchForceLabel(winch);
+      if (!label) continue;
       if (
         !running ||
         isDocked(winch.el) ||
         isStockTemplate(winch.el) ||
         winch.snap?.type !== "rope"
       ) {
-        label.hidden = true;
+        label.textContent = "";
+        label.style.visibility = "hidden";
         continue;
       }
 
       const rope = winch.snap.rope;
       const state = getRopeForceState(rope);
       if (!state) {
-        label.hidden = true;
+        label.textContent = "";
+        label.style.visibility = "hidden";
         continue;
       }
 
@@ -4448,12 +4462,13 @@
         WINCH_MAX_FORCE_N
       );
       if (pullN < 0.5) {
-        label.hidden = true;
+        label.textContent = "";
+        label.style.visibility = "hidden";
         continue;
       }
 
       label.textContent = `${Math.round(pullN)} N`;
-      label.hidden = false;
+      label.style.visibility = "visible";
       label.classList.toggle("is-at-max", pullN >= WINCH_MAX_FORCE_N - 0.5);
       label.classList.toggle(
         "is-overloaded",
@@ -5417,8 +5432,8 @@
       }
       const p = stagePoint(e);
       const { width, height } = stageSize();
-      const w = winch.el.offsetWidth || 80;
-      const h = winch.el.offsetHeight || 80;
+      const w = winch.el.offsetWidth || 100;
+      const h = winch.el.offsetHeight || 98;
       winch.el.style.left = `${clamp(p.x - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(p.y - grabOffsetY, 0, Math.max(0, height - h))}px`;
       const snap = findWinchSnapTarget(winch);
@@ -5476,8 +5491,8 @@
         return;
       }
       const { rect, width, height } = stageSize();
-      const w = winch.el.offsetWidth || 80;
-      const h = winch.el.offsetHeight || 80;
+      const w = winch.el.offsetWidth || 100;
+      const h = winch.el.offsetHeight || 98;
       winch.el.style.left = `${clamp(ev.clientX - rect.left - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(ev.clientY - rect.top - grabOffsetY, 0, Math.max(0, height - h))}px`;
       const snap = findWinchSnapTarget(winch);
