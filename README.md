@@ -9,10 +9,10 @@ cd kladkostroj
 npm start
 ```
 
-Otevři **http://localhost:3480**.
+Otevři **http://localhost:3480**. Při úpravách souborů se stránka sama obnoví.
 
 ## Ovládání
 
-- **Přesun** — přesouvej kladky (pevná se přichytává černým úchytem k okrajům)
-- **Tužka** — namaluj lano; po puštění se uhladí a obloukem kopíruje drážku kladky
-- **Smazat lano** — smaže všechna namalovaná lana
+- **Lano** (přepínač) — aktivní: kreslení lana; neaktivní: přesouvání kladek a závaží
+- **Spustit** — spustí / zastaví simulaci
+- **Smazat lano** — guma smaže lana a objekty

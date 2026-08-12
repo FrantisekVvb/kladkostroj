@@ -25,6 +25,10 @@
         --area-muted: #eceff5;
         --readout-bg: #ffffff;
         --font-app: ui-sans-serif, system-ui, sans-serif;
+        --pulley-scale: 0.9;
+        --pulley-fixed-max: 125px;
+        --pulley-free-max: 116px;
+        --weight-max: 78px;
       }
 
       html,
@@ -82,59 +86,15 @@
         letter-spacing: -0.02em;
       }
 
-      .mode-switch {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 4px;
-        padding: 4px;
-        border-radius: 12px;
-        background: var(--area-muted);
-      }
-
-      .mode-switch__btn {
-        appearance: none;
-        min-height: 40px;
-        padding: 8px 6px;
-        border: none;
-        border-radius: 9px;
-        background: transparent;
-        color: var(--muted);
-        font-weight: 600;
-        font-size: 0.82rem;
-        cursor: pointer;
-        transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-      }
-
-      .mode-switch__btn:hover {
-        color: var(--text);
-      }
-
-      .mode-switch__btn.is-active {
-        background: var(--panel-bg);
-        color: var(--text);
-        box-shadow: 0 1px 3px rgb(23 25 35 / 0.1);
-      }
-
-      .mode-switch__btn.is-run.is-active {
-        background: #16a34a;
-        color: #fff;
-        box-shadow: 0 1px 3px rgb(22 163 74 / 0.35);
-      }
-
-      .mode-switch__btn:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-      }
-
       .panel-actions {
         display: grid;
-        grid-template-columns: 1fr 1fr auto;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 8px;
         align-items: stretch;
       }
 
-      .panel-actions--forces {
-        grid-template-columns: 1fr;
+      .panel-actions--tools {
+        grid-template-columns: 1fr 1fr auto;
       }
 
       .action-btn {
@@ -174,6 +134,18 @@
       .action-btn.is-active:hover:not(:disabled) {
         border-color: var(--accent);
         background: #334e86;
+        color: #fff;
+      }
+
+      .action-btn.is-run.is-active {
+        border-color: #16a34a;
+        background: #16a34a;
+        color: #fff;
+      }
+
+      .action-btn.is-run.is-active:hover:not(:disabled) {
+        border-color: #15803d;
+        background: #15803d;
         color: #fff;
       }
 
@@ -234,14 +206,15 @@
       .stock-slot {
         display: flex;
         flex-wrap: wrap;
-        align-items: flex-end;
+        align-items: center;
         justify-content: center;
-        gap: 8px;
-        min-height: 72px;
-        padding: 8px;
+        gap: 6px;
+        min-height: 88px;
+        padding: 8px 8px 10px;
         border-radius: 12px;
         background: var(--panel-bg);
         border: 1px solid var(--border);
+        overflow: hidden;
       }
 
       .stock-slot__label {
@@ -279,6 +252,13 @@
 
       .app-root[data-tool="pencil"] #stage {
         cursor: crosshair;
+      }
+
+      .app-root[data-tool="pencil"] .stock-section {
+        opacity: 0.45;
+        filter: grayscale(0.35);
+        pointer-events: none;
+        user-select: none;
       }
 
       .app-root[data-tool="erase"] #stage {
@@ -327,7 +307,7 @@
       }
 
       .pulley--fixed svg {
-        width: 112px;
+        width: calc(var(--pulley-fixed-max) * var(--pulley-scale));
       }
 
       .pulley--free {
@@ -336,7 +316,7 @@
       }
 
       .pulley--free svg {
-        width: 104px;
+        width: calc(var(--pulley-free-max) * var(--pulley-scale));
       }
 
       .pulley.is-docked,
@@ -356,18 +336,18 @@
 
       .pulley.is-docked.pulley--fixed svg,
       .pulley.is-stock-template.pulley--fixed svg {
-        width: 76px;
+        width: 48px;
       }
 
       .pulley.is-docked.pulley--free,
       .pulley.is-stock-template.pulley--free {
-        transform: rotate(180deg) scale(0.72);
+        transform: rotate(180deg);
         transform-origin: 50% 50%;
       }
 
       .pulley.is-docked.pulley--free svg,
       .pulley.is-stock-template.pulley--free svg {
-        width: 72px;
+        width: 40px;
       }
 
       .weight {
@@ -387,7 +367,7 @@
       .weight svg {
         display: block;
         pointer-events: none;
-        width: 70px;
+        width: calc(var(--weight-max) * var(--pulley-scale));
         height: auto;
       }
 
@@ -413,7 +393,7 @@
       .winch svg {
         display: block;
         pointer-events: none;
-        width: 78px;
+        width: 86px;
         height: auto;
       }
 
@@ -427,17 +407,30 @@
 
       .winch.is-docked svg,
       .winch.is-stock-template svg {
-        width: 56px;
+        width: 64px;
       }
 
       .winch.is-snapping {
         outline: 2px dashed #58a1ff;
         outline-offset: 2px;
-        border-radius: 4px;
+        border-radius: 6px;
+      }
+
+      .winch-light {
+        fill: #ffffff;
+        transition: fill 0.15s ease;
+      }
+
+      .winch.is-winding .winch-light {
+        fill: #22c55e;
+      }
+
+      .winch.is-overload .winch-light {
+        fill: #ef4444;
       }
 
       .winch.is-winding .winch-drum {
-        animation: winch-spin 0.7s linear infinite;
+        animation: winch-spin 2.8s linear infinite;
       }
 
       @keyframes winch-spin {
@@ -512,7 +505,6 @@
       .app-root[data-tool="erase"] .rope-path {
         pointer-events: stroke;
         cursor: pointer;
-        stroke-width: 14;
       }
 
       .app-root[data-tool="erase"] .rope-end-handle {
@@ -611,22 +603,57 @@
         fill: #15803d;
       }
 
+      .size-control {
+        display: grid;
+        gap: 8px;
+      }
+
+      .size-control__row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      #pulley-size-slider {
+        width: 100%;
+        height: 6px;
+        min-width: 0;
+        -webkit-appearance: none;
+        appearance: none;
+        border-radius: 999px;
+        background: var(--area-muted);
+        outline: none;
+      }
+
+      #pulley-size-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #ffffff;
+        border: 2px solid var(--accent);
+        cursor: pointer;
+      }
+
+      #pulley-size-slider::-moz-range-track {
+        height: 6px;
+        border-radius: 999px;
+        background: var(--area-muted);
+      }
+
+      #pulley-size-slider::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--accent);
+        border-radius: 50%;
+        background: #ffffff;
+        cursor: pointer;
+      }
+
       @media (max-width: 720px) {
         :root {
           --panel-w: min(200px, 42vw);
-        }
-
-        .mode-switch__btn {
-          font-size: 0.74rem;
-          padding: 8px 4px;
-        }
-
-        .pulley--fixed svg {
-          width: 88px;
-        }
-
-        .pulley--free svg {
-          width: 82px;
         }
       }
     </style>
@@ -636,44 +663,38 @@
       <aside class="left-panel" aria-label="Ovládání simulace">
         <div class="panel-copy">
           <h1 class="panel-title">Kladkostroj</h1>
-          <div class="mode-switch" role="tablist" aria-label="Mód simulace">
-            <button
-              type="button"
-              id="tool-move"
-              class="mode-switch__btn is-active"
-              role="tab"
-              aria-selected="true"
-              aria-pressed="true"
-            >
-              Přesun
-            </button>
-            <button
-              type="button"
-              id="tool-pencil"
-              class="mode-switch__btn"
-              role="tab"
-              aria-selected="false"
-              aria-pressed="false"
-            >
-              Tužka
+          <div class="panel-actions" aria-label="Simulace">
+            <button type="button" id="tool-undo" class="action-btn" disabled>
+              Zpět
             </button>
             <button
               type="button"
               id="tool-run"
-              class="mode-switch__btn"
-              role="tab"
-              aria-selected="false"
+              class="action-btn"
               aria-pressed="false"
             >
               Spustit
             </button>
-          </div>
-          <div class="panel-actions">
-            <button type="button" id="tool-undo" class="action-btn" disabled>
-              Zpět
-            </button>
             <button type="button" id="tool-reset" class="action-btn" disabled>
               Reset
+            </button>
+          </div>
+          <div class="panel-actions panel-actions--tools" aria-label="Nástroje">
+            <button
+              type="button"
+              id="tool-rope"
+              class="action-btn"
+              aria-pressed="false"
+            >
+              Lano
+            </button>
+            <button
+              type="button"
+              id="toggle-forces"
+              class="action-btn"
+              aria-pressed="false"
+            >
+              Síly
             </button>
             <button
               type="button"
@@ -684,37 +705,40 @@
               title="Guma"
             >
               <span class="action-btn__icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
                   <path
-                    d="M4.8 14.2 12.6 6.4a2.2 2.2 0 0 1 3.1 0l1.9 1.9a2.2 2.2 0 0 1 0 3.1l-7.8 7.8H4.8v-5z"
-                    fill="currentColor"
-                    opacity="0.22"
+                    d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"
                   />
-                  <path
-                    d="M12.6 6.4a2.2 2.2 0 0 1 3.1 0l1.9 1.9a2.2 2.2 0 0 1 0 3.1L9.8 19.2H4.8v-5l7.8-7.8z"
-                    stroke="currentColor"
-                    stroke-width="1.7"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="M8.2 15.8h7.4"
-                    stroke="currentColor"
-                    stroke-width="1.7"
-                    stroke-linecap="round"
-                  />
+                  <path d="M22 21H7" />
+                  <path d="m5 11 9 9" />
                 </svg>
               </span>
             </button>
           </div>
-          <div class="panel-actions panel-actions--forces">
-            <button
-              type="button"
-              id="toggle-forces"
-              class="action-btn"
-              aria-pressed="false"
-            >
-              Síly
-            </button>
+          <div class="size-control">
+            <label class="panel-label" for="pulley-size-slider">Velikost kladek a závaží</label>
+            <div class="size-control__row">
+              <input
+                type="range"
+                id="pulley-size-slider"
+                min="40"
+                max="100"
+                step="1"
+                value="90"
+                aria-valuemin="40"
+                aria-valuemax="100"
+                aria-valuenow="90"
+                aria-label="Velikost kladek a závaží na ploše"
+              />
+            </div>
           </div>
         </div>
 
@@ -801,7 +825,7 @@
                 fill="white"
               />
               <path
-                d="M143.473 15.2496L143.436 35.3689L142.995 281.162"
+                d="M143.314 103.887L143.29 117.3L142.995 281.162"
                 stroke="#1D1D1B"
                 stroke-width="30.4992"
                 stroke-miterlimit="10"

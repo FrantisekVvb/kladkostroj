@@ -4,7 +4,7 @@
   "description": "Kladkostroj — sestavování z volných a pevných kladek",
   "license": "MIT",
   "scripts": {
-    "start": "npx --yes serve . -l 3480",
+    "start": "npx --yes live-server --port=3480 --no-browser --watch=.",
     "dev": "npm start"
   },
   "engines": {

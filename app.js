@@ -2,13 +2,13 @@
   const appRoot = document.querySelector(".app-root");
   const stage = document.getElementById("stage");
   const ropeLayer = document.getElementById("rope-layer");
-  const btnMove = document.getElementById("tool-move");
-  const btnPencil = document.getElementById("tool-pencil");
+  const btnRope = document.getElementById("tool-rope");
   const btnRun = document.getElementById("tool-run");
   const btnErase = document.getElementById("tool-erase");
   const btnUndo = document.getElementById("tool-undo");
   const btnReset = document.getElementById("tool-reset");
   const btnForces = document.getElementById("toggle-forces");
+  const pulleySizeSlider = document.getElementById("pulley-size-slider");
   const stockTray = document.getElementById("stock-tray");
   const stockSlotFixed = document.getElementById("stock-slot-fixed");
   const stockSlotFree = document.getElementById("stock-slot-free");
@@ -49,7 +49,7 @@
   const MIN_WRAP_TRAVEL = 0.35;
 
   /** Konec volné tyčky u modré kladky (SVG souřadnice). */
-  const FREE_ROD_TIP = { x: 143.473, y: 15.2496 };
+  const FREE_ROD_TIP = { x: 143.314, y: 103.887 };
 
   /** Závěs závaží — střed horního kroužku. */
   const WEIGHT = {
@@ -77,12 +77,13 @@
 
   const WEIGHT_SVG = `<svg width="280" height="269" viewBox="0 0 280 269" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="138" cy="50" r="45" stroke="#858585" stroke-width="10"/><path d="M267.34 269H12.3699C6.00343 269 1.2579 263.13 2.59185 256.905L43.3061 66.9047C44.2941 62.294 48.3688 59 53.0842 59H222.101C226.732 59 230.757 62.1791 231.829 66.6838L277.068 256.684C278.564 262.968 273.799 269 267.34 269Z" fill="#858585"/></svg>`;
 
-  const WINCH_SVG = `<svg width="120" height="100" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="8" y="72" width="104" height="20" rx="4" fill="#4B5563"/><rect x="20" y="30" width="14" height="46" rx="2" fill="#374151"/><rect x="86" y="30" width="14" height="46" rx="2" fill="#374151"/><g class="winch-drum"><circle cx="60" cy="48" r="24" fill="#9CA3AF" stroke="#1F2937" stroke-width="5"/><circle cx="60" cy="48" r="9" fill="#1F2937"/><path d="M60 28v40M40 48h40" stroke="#6B7280" stroke-width="3" stroke-linecap="round"/></g><circle cx="60" cy="12" r="8" stroke="#858585" stroke-width="5"/><circle cx="60" cy="12" r="2.5" fill="#858585"/></svg>`;
+  const WINCH_SVG = `<svg width="129" height="85" viewBox="0 0 129 85" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="129" height="85" rx="6" fill="black"/><g transform="translate(74.7 41.7016)"><g class="winch-drum"><g transform="translate(-74.7 -41.7016)"><path d="M74.6989 72.4041C91.6555 72.4041 105.402 58.6581 105.402 41.7015C105.402 24.745 91.6555 10.999 74.6989 10.999C57.7423 10.999 43.9963 24.745 43.9963 41.7015C43.9963 58.6581 57.7423 72.4041 74.6989 72.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M74.7016 77.4031C94.419 77.4031 110.403 61.419 110.403 41.7016C110.403 21.9841 94.419 6 74.7016 6C54.9841 6 39 21.9841 39 41.7016C39 61.419 54.9841 77.4031 74.7016 77.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M107.233 41.7016C107.233 59.665 92.6701 74.2335 74.7012 74.2335C56.7323 74.2335 42.1693 59.6705 42.1693 41.7016C42.1693 23.7327 56.7323 9.16968 74.7012 9.16968" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M47.9513 41.7234H101.375" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M74.6575 15.0091V68.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M55.7767 22.8317L93.5548 60.6097" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M93.5548 22.8317L55.7767 60.6097" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.8699 31.7641L99.4423 51.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M84.614 16.9374L64.7005 66.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M64.1691 17.1571L85.1429 66.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M99.2219 31.2367L50.0889 52.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g></g></g><circle class="winch-light" cx="16" cy="15" r="6" fill="white"/></svg>`;
 
   const WINCH = {
-    vbW: 120,
-    hookX: 60,
-    hookY: 12,
+    vbW: 129,
+    /** Úchyt lana — horní bod bubnu (odkud lano odchází). */
+    hookX: 74.7,
+    hookY: 6,
   };
 
   const GRAVITY = 520;
@@ -434,20 +435,52 @@
     return clamp(along, 0, height);
   }
 
-  /** Střed (osa) červené pevné kladky ve stage souřadnicích. */
-  function getFixedPulleyCenterWorld(pulleyId) {
-    const wheels = collectWheels().filter((w) => w.kind === "fixed");
+  /** Střed (osa) kladky ve stage souřadnicích — pevná i volná. */
+  function getPulleyCenterWorld(pulleyId) {
+    const wheels = collectWheels();
     const w = pulleyId
       ? wheels.find((x) => x.id === pulleyId)
-      : wheels[0];
+      : null;
     if (!w) return null;
-    return { x: w.cx, y: w.cy, pulleyId: w.id };
+    return { x: w.cx, y: w.cy, pulleyId: w.id, kind: w.kind };
+  }
+
+  /** @deprecated alias — starší scény používají fixedCenter */
+  function getFixedPulleyCenterWorld(pulleyId) {
+    return getPulleyCenterWorld(pulleyId);
+  }
+
+  function isPulleyCenterSnap(snap) {
+    return (
+      !!snap &&
+      (snap.type === "pulleyCenter" ||
+        snap.type === "fixedCenter" ||
+        snap.type === "freeCenter")
+    );
+  }
+
+  /** ID kladek, ke jejichž středu je konec lana přimknutý — ty se neobepínají. */
+  function pulleyCenterExcludeIds(...snaps) {
+    const ids = new Set();
+    for (const snap of snaps) {
+      if (isPulleyCenterSnap(snap) && snap.pulleyId) ids.add(snap.pulleyId);
+    }
+    return ids;
+  }
+
+  function ropeCenterExcludeIds(rope) {
+    if (!rope?.edgeSnap) return new Set();
+    return pulleyCenterExcludeIds(rope.edgeSnap.start, rope.edgeSnap.end);
+  }
+
+  function wheelExcludedFromWrap(wheel, excludeIds) {
+    return !!(excludeIds && wheel?.id && excludeIds.has(wheel.id));
   }
 
   function edgePointFromSnap(snap) {
     if (!snap) return null;
-    if (snap.type === "fixedCenter") {
-      const c = getFixedPulleyCenterWorld(snap.pulleyId);
+    if (isPulleyCenterSnap(snap)) {
+      const c = getPulleyCenterWorld(snap.pulleyId);
       return c ? { x: c.x, y: c.y } : { x: 0, y: 0 };
     }
     const { width, height } = stageSize();
@@ -499,18 +532,18 @@
     return null;
   }
 
-  /** Přichycení ke středu červené kladky. */
-  function findFixedCenterSnapTarget(p) {
+  /** Přichycení ke středu kladky (červená i modrá). */
+  function findPulleyCenterSnapTarget(p) {
     let best = null;
     for (const wheel of collectWheels()) {
-      if (wheel.kind !== "fixed") continue;
       const center = { x: wheel.cx, y: wheel.cy };
       const d = dist(p, center);
       if (d > CLOSE_SNAP_RADIUS) continue;
       if (!best || d < best.d) {
         best = {
-          type: "fixedCenter",
+          type: "pulleyCenter",
           pulleyId: wheel.id,
+          kind: wheel.kind,
           point: center,
           d,
         };
@@ -519,17 +552,22 @@
     return best;
   }
 
+  function findFixedCenterSnapTarget(p) {
+    return findPulleyCenterSnapTarget(p);
+  }
+
   /**
-   * Kotva pro konec lana: střed červené kladky má přednost před okrajem,
-   * pokud je blíž (kladka sedí u horního okraje).
+   * Kotva pro konec lana: střed kladky má přednost před okrajem,
+   * pokud je blíž (kladka sedí u okraje).
    */
   function findAnchorSnapTarget(p) {
-    const center = findFixedCenterSnapTarget(p);
+    const center = findPulleyCenterSnapTarget(p);
     const edge = findEdgeSnapTarget(p);
     if (center && edge) {
-      const edgeD = edge.edge === "top" || edge.edge === "bottom"
-        ? Math.abs(p.y - edge.point.y)
-        : Math.abs(p.x - edge.point.x);
+      const edgeD =
+        edge.edge === "top" || edge.edge === "bottom"
+          ? Math.abs(p.y - edge.point.y)
+          : Math.abs(p.x - edge.point.x);
       return center.d <= edgeD ? center : edge;
     }
     return center || edge;
@@ -537,8 +575,11 @@
 
   function normalizeEndSnap(snap) {
     if (!snap) return null;
-    if (snap.type === "fixedCenter") {
-      return { type: "fixedCenter", pulleyId: snap.pulleyId || null };
+    if (isPulleyCenterSnap(snap)) {
+      return {
+        type: "pulleyCenter",
+        pulleyId: snap.pulleyId || null,
+      };
     }
     if (snap.edge) {
       return {
@@ -606,20 +647,18 @@
   function applyToolChrome(next) {
     if (appRoot) appRoot.dataset.tool = next;
     stage.dataset.tool = next;
-    btnMove.classList.toggle("is-active", next === "move");
-    btnPencil.classList.toggle("is-active", next === "pencil");
+    const ropeOn = next === "pencil";
+    if (btnRope) {
+      btnRope.classList.toggle("is-active", ropeOn);
+      btnRope.setAttribute("aria-pressed", String(ropeOn));
+    }
     btnRun.classList.toggle("is-active", next === "run");
     btnRun.classList.toggle("is-run", next === "run");
     if (btnErase) {
       btnErase.classList.toggle("is-active", next === "erase");
       btnErase.setAttribute("aria-pressed", String(next === "erase"));
     }
-    btnMove.setAttribute("aria-pressed", String(next === "move"));
-    btnPencil.setAttribute("aria-pressed", String(next === "pencil"));
     btnRun.setAttribute("aria-pressed", String(next === "run"));
-    btnMove.setAttribute("aria-selected", String(next === "move"));
-    btnPencil.setAttribute("aria-selected", String(next === "pencil"));
-    btnRun.setAttribute("aria-selected", String(next === "run"));
     btnRun.textContent = next === "run" ? "Zastavit" : "Spustit";
   }
 
@@ -631,6 +670,65 @@
 
     if (next === "run") startSimulation();
     else syncRopeEndHandles();
+  }
+
+  /** Nastaví měřítko kladek a závaží na ploše (0.4–1). Zachová středy / úchyty. */
+  function setPulleyScale(scale) {
+    const next = clamp(scale, 0.4, 1);
+    const freeAnchors = [];
+    for (const pulley of pulleys) {
+      if (pulley.kind !== "free" || isDocked(pulley.el)) continue;
+      const wheel = getWheelWorld(pulley.el, "free");
+      freeAnchors.push({
+        el: pulley.el,
+        cx: wheel.cx,
+        cy: wheel.cy,
+      });
+    }
+    const weightHooks = [];
+    for (const weight of weights) {
+      if (isDocked(weight.el) || weight.snap?.type !== "free") continue;
+      const hook = getWeightHookWorld(weight);
+      weightHooks.push({ weight, x: hook.x, y: hook.y });
+    }
+
+    document.documentElement.style.setProperty("--pulley-scale", String(next));
+
+    for (const anchor of freeAnchors) {
+      const wheel = getWheelWorld(anchor.el, "free");
+      const left = parseFloat(anchor.el.style.left) || 0;
+      const top = parseFloat(anchor.el.style.top) || 0;
+      anchor.el.style.left = `${left + (anchor.cx - wheel.cx)}px`;
+      anchor.el.style.top = `${top + (anchor.cy - wheel.cy)}px`;
+    }
+
+    for (const pulley of pulleys) {
+      if (pulley.kind !== "fixed" || isDocked(pulley.el)) continue;
+      if (typeof pulley.el._fixedResizeHandler === "function") {
+        pulley.el._fixedResizeHandler();
+      }
+    }
+
+    for (const anchor of weightHooks) {
+      placeWeightAtHook(anchor.weight, { x: anchor.x, y: anchor.y });
+    }
+
+    syncRopeViewBox();
+    rebuildAllRopes();
+    syncAllWeightsToSnap();
+    syncRopeEndHandles();
+    updateForceArrows();
+
+    if (pulleySizeSlider) {
+      const pct = Math.round(next * 100);
+      pulleySizeSlider.value = String(pct);
+      pulleySizeSlider.setAttribute("aria-valuenow", String(pct));
+    }
+  }
+
+  function onPulleySizeSliderInput() {
+    if (!pulleySizeSlider) return;
+    setPulleyScale(Number(pulleySizeSlider.value) / 100);
   }
 
   function isDocked(el) {
@@ -723,7 +821,7 @@
       if (rope.edgeSnap) {
         for (const which of ["start", "end"]) {
           const snap = rope.edgeSnap[which];
-          if (snap?.type === "fixedCenter" && snap.pulleyId === id) {
+          if (isPulleyCenterSnap(snap) && snap.pulleyId === id) {
             rope.edgeSnap[which] = null;
           }
         }
@@ -829,8 +927,8 @@
   function placeWinchAtHook(winch, point) {
     const { width, height } = stageSize();
     const off = getWinchHookOffset(winch);
-    const w = winch.el.offsetWidth || 78;
-    const h = winch.el.offsetHeight || 65;
+    const w = winch.el.offsetWidth || 86;
+    const h = winch.el.offsetHeight || 57;
     const left = clamp(point.x - off.x, 0, Math.max(0, width - w));
     const top = clamp(point.y - off.y, 0, Math.max(0, height - h));
     winch.el.style.left = `${left}px`;
@@ -857,9 +955,14 @@
     );
   }
 
-  function setWinchWinding(winch, on) {
-    winch.winding = !!on;
-    winch.el.classList.toggle("is-winding", !!on);
+  /** @param {"idle"|"winding"|"overload"|boolean} state */
+  function setWinchWinding(winch, state) {
+    let mode = "idle";
+    if (state === true || state === "winding") mode = "winding";
+    else if (state === "overload") mode = "overload";
+    winch.winding = mode === "winding";
+    winch.el.classList.toggle("is-winding", mode === "winding");
+    winch.el.classList.toggle("is-overload", mode === "overload");
   }
 
   function syncWinchToSnap(winch) {
@@ -1295,8 +1398,10 @@
    * Když volný úsek míjí neobepnutou kladku, doplň wrap —
    * jinak lineToAvoidingWheels udělá „V“ s mezerou pod kolem.
    */
-  function supplementMissedWraps(pts, picked) {
-    const wheels = collectWheels();
+  function supplementMissedWraps(pts, picked, excludeIds = null) {
+    const wheels = collectWheels().filter(
+      (w) => !wheelExcludedFromWrap(w, excludeIds)
+    );
     for (let guard = 0; guard < wheels.length + 2; guard += 1) {
       let added = false;
       for (const wheel of wheels) {
@@ -1332,8 +1437,10 @@
     }
   }
 
-  function pickWrapEvents(pts) {
-    const wheels = collectWheels();
+  function pickWrapEvents(pts, excludeIds = null) {
+    const wheels = collectWheels().filter(
+      (w) => !wheelExcludedFromWrap(w, excludeIds)
+    );
     const events = [];
 
     for (const wheel of wheels) {
@@ -1373,7 +1480,7 @@
       picked.push(ev);
     }
 
-    supplementMissedWraps(pts, picked);
+    supplementMissedWraps(pts, picked, excludeIds);
     return picked;
   }
 
@@ -2007,8 +2114,10 @@
   /**
    * Doplň wrapy pro kladky, kterými by volný úsek / tětiva procházela.
    */
-  function ensureWrapsAgainstCrossing(pts, wraps) {
-    const wheels = collectWheels();
+  function ensureWrapsAgainstCrossing(pts, wraps, excludeIds = null) {
+    const wheels = collectWheels().filter(
+      (w) => !wheelExcludedFromWrap(w, excludeIds)
+    );
     for (let guard = 0; guard < wheels.length + 2; guard += 1) {
       let added = false;
 
@@ -2133,8 +2242,13 @@
     return sticky;
   }
 
-  function buildRopePath(rawPoints, closed = false, stickyIds = null) {
+  function buildRopePath(rawPoints, closed = false, stickyIds = null, excludeIds = null) {
     if (rawPoints.length < 2) return pointsToPolyline(rawPoints);
+
+    const exclude =
+      excludeIds instanceof Set
+        ? excludeIds
+        : new Set(excludeIds || []);
 
     // Jemnější simplify — hrubý maže body u druhé kladky a wrap se ztratí
     let pts = simplify(rawPoints, 0.9);
@@ -2148,17 +2262,20 @@
       }
     }
 
-    let wraps = pickWrapEvents(pts);
-    wraps = ensureWrapsAgainstCrossing(pts, wraps);
+    const sticky = (stickyIds || []).filter((id) => !exclude.has(id));
+    let wraps = pickWrapEvents(pts, exclude);
+    wraps = ensureWrapsAgainstCrossing(pts, wraps, exclude);
     // Lepkavé kladky mají přednost — nenech wrap zmizet ve vzdálenosti
-    wraps = mergeStickyWraps(pts, wraps, stickyIds);
+    wraps = mergeStickyWraps(pts, wraps, sticky);
+    wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
 
     if (!wraps.length) {
       const a = pts[0];
       const b = pts[pts.length - 1];
       // Jen skutečný průchod diskem — ne pouhý dotyk v okolí (to by „přilepilo“ lano)
-      const hitWheel = collectWheels().find((w) =>
-        segmentCrossesWheel(a, b, w, 1)
+      const hitWheel = collectWheels().find(
+        (w) =>
+          !wheelExcludedFromWrap(w, exclude) && segmentCrossesWheel(a, b, w, 1)
       );
       if (hitWheel) {
         const cw = wrapDirection(pts, 0, pts.length - 1, hitWheel) === "cw";
@@ -2187,7 +2304,9 @@
 
     // Po vyřešení: volné úseky nesmí jít skrz cizí kladku
     {
-      const allWheels = collectWheels();
+      const allWheels = collectWheels().filter(
+        (w) => !wheelExcludedFromWrap(w, exclude)
+      );
       const segs = [];
       if (!closed) {
         segs.push({
@@ -2209,7 +2328,7 @@
         });
       }
       let needsRetry = false;
-      const extraIds = stickyIds ? stickyIds.slice() : [];
+      const extraIds = sticky.slice();
       for (const seg of segs) {
         for (const wheel of allWheels) {
           if (!segmentCrossesWheel(seg.a, seg.b, wheel, 1)) continue;
@@ -2222,6 +2341,7 @@
       }
       if (needsRetry) {
         wraps = mergeStickyWraps(pts, wraps, extraIds);
+        wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
         geom = solveWrapGeometry(wraps, pts, closed);
       }
     }
@@ -2274,9 +2394,14 @@
     let pts = simplify(rope.points, 0.9);
     if (pts.length < 2) pts = rope.points.slice();
 
-    let wraps = pickWrapEvents(pts);
-    wraps = ensureWrapsAgainstCrossing(pts, wraps);
-    wraps = mergeStickyWraps(pts, wraps, rope.wrapIds || rope.wrapKinds || null);
+    const exclude = ropeCenterExcludeIds(rope);
+    const sticky = (rope.wrapIds || rope.wrapKinds || []).filter(
+      (id) => !exclude.has(id)
+    );
+    let wraps = pickWrapEvents(pts, exclude);
+    wraps = ensureWrapsAgainstCrossing(pts, wraps, exclude);
+    wraps = mergeStickyWraps(pts, wraps, sticky);
+    wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
 
     if (!wraps.length) return { wraps: [], closed: rope.closed };
 
@@ -2623,16 +2748,36 @@
     };
   }
 
-  function enforceRopeLength(model, startPt, endPt, restLength) {
+  /**
+   * Zkrať geometrii lana na restLength.
+   * Pevné konce (naviják / okraj) se nehýbou — posouvá se jen volný konec.
+   */
+  function enforceRopeLength(model, startPt, endPt, restLength, opts = {}) {
     let s = { x: startPt.x, y: startPt.y };
     let e = { x: endPt.x, y: endPt.y };
+    const startFixed = !!opts.startFixed;
+    const endFixed = !!opts.endFixed;
 
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 12; i += 1) {
       const L = measureModelLength(model, s, e);
       if (L <= restLength + 0.5) break;
       const excess = L - restLength;
       const tang = modelTangentPoints(model, s, e);
       if (!tang) break;
+
+      if (startFixed && endFixed) {
+        // Oba konce pevné — řeší enforceRopeLengthViaFreePulley
+        break;
+      }
+      if (startFixed) {
+        e = moveToward(e, tang.end, excess);
+        continue;
+      }
+      if (endFixed) {
+        s = moveToward(s, tang.start, excess);
+        continue;
+      }
+
       const legA = dist(s, tang.start);
       const legB = dist(tang.end, e);
       const total = legA + legB + 1e-6;
@@ -2641,6 +2786,12 @@
     }
 
     return { start: s, end: e };
+  }
+
+  function ropeEndIsFixed(rope, which) {
+    if (winchOnRopeEnd(rope, which)) return true;
+    if (weightOnRopeEnd(rope, which)) return false;
+    return isRopeEndOnEdge(rope, which);
   }
 
   /** Posun volné kladky bez rebuildAllRopes (pro constraint během integrace). */
@@ -2664,22 +2815,26 @@
     startPt,
     endPt,
     restLength,
-    freePulley
+    freePulley,
+    rope
   ) {
     if (!freePulley?.el || isDocked(freePulley.el)) return;
     const el = freePulley.el;
     const eps = 1.5;
     for (let i = 0; i < 10; i += 1) {
-      const L = measureModelLength(model, startPt, endPt);
+      const pts0 = endpointsWithPulleyCenters(rope, startPt, endPt, freePulley);
+      const L = measureModelLength(model, pts0.start, pts0.end);
       if (L <= restLength + 0.5) break;
       const excess = L - restLength;
       const left0 = parseFloat(el.style.left) || 0;
       const top0 = parseFloat(el.style.top) || 0;
       el.style.left = `${left0 + eps}px`;
-      const dLx = (measureModelLength(model, startPt, endPt) - L) / eps;
+      const ptsX = endpointsWithPulleyCenters(rope, startPt, endPt, freePulley);
+      const dLx = (measureModelLength(model, ptsX.start, ptsX.end) - L) / eps;
       el.style.left = `${left0}px`;
       el.style.top = `${top0 + eps}px`;
-      const dLy = (measureModelLength(model, startPt, endPt) - L) / eps;
+      const ptsY = endpointsWithPulleyCenters(rope, startPt, endPt, freePulley);
+      const dLy = (measureModelLength(model, ptsY.start, ptsY.end) - L) / eps;
       el.style.top = `${top0}px`;
       const g2 = dLx * dLx + dLy * dLy;
       if (g2 < 1e-8) break;
@@ -2745,7 +2900,10 @@
     const offS = startW ? getWeightHookOffset(startW) : { x: 0, y: 0 };
     const offE = endW ? getWeightHookOffset(endW) : { x: 0, y: 0 };
 
-    const corrected = enforceRopeLength(model, startPt, endPt, restLength);
+    const corrected = enforceRopeLength(model, startPt, endPt, restLength, {
+      startFixed: ropeEndIsFixed(rope, "start"),
+      endFixed: ropeEndIsFixed(rope, "end"),
+    });
 
     if (startWinch) {
       corrected.start = getWinchHookWorld(startWinch);
@@ -2820,7 +2978,10 @@
           ? getWeightHookWorld(endW)
           : { ...rope.sim.endPt };
 
-    const corrected = enforceRopeLength(model, startPt, endPt, restLength);
+    const corrected = enforceRopeLength(model, startPt, endPt, restLength, {
+      startFixed: !!startWinch || startEdge,
+      endFixed: !!endWinch || endEdge,
+    });
 
     if (startWinch) corrected.start = getWinchHookWorld(startWinch);
     else if (startEdge) corrected.start = getRopeEndPoint(rope, "start");
@@ -2934,9 +3095,29 @@
     return a.x * b.x + a.y * b.y;
   }
 
+  /** Když je konec lana na středu dané kladky, vrať aktuální střed. */
+  function endpointIfPulleyCenter(rope, which, pulley) {
+    if (!rope || !pulley) return null;
+    const snap = rope.edgeSnap?.[which];
+    if (!isPulleyCenterSnap(snap)) return null;
+    if (snap.pulleyId && snap.pulleyId !== pulley.id) return null;
+    const c = getPulleyCenterWorld(snap.pulleyId || pulley.id);
+    return c ? { x: c.x, y: c.y } : null;
+  }
+
+  function endpointsWithPulleyCenters(rope, startPt, endPt, pulley) {
+    return {
+      start: endpointIfPulleyCenter(rope, "start", pulley) || startPt,
+      end: endpointIfPulleyCenter(rope, "end", pulley) || endPt,
+    };
+  }
+
   function numericalLengthGradient(model, startPt, endPt, opts) {
     const eps = 1.5;
-    const base = measureModelLength(model, startPt, endPt);
+    const rope = opts.rope || null;
+    const pulley = opts.pulleyEl ? findPulleyByEl(opts.pulleyEl) : null;
+    const basePts = endpointsWithPulleyCenters(rope, startPt, endPt, pulley);
+    const base = measureModelLength(model, basePts.start, basePts.end);
     const grad = {
       start: { x: 0, y: 0 },
       end: { x: 0, y: 0 },
@@ -2945,21 +3126,35 @@
 
     if (opts.startFree) {
       grad.start.x =
-        (measureModelLength(model, { x: startPt.x + eps, y: startPt.y }, endPt) -
+        (measureModelLength(
+          model,
+          { x: startPt.x + eps, y: startPt.y },
+          endPt
+        ) -
           base) /
         eps;
       grad.start.y =
-        (measureModelLength(model, { x: startPt.x, y: startPt.y + eps }, endPt) -
+        (measureModelLength(
+          model,
+          { x: startPt.x, y: startPt.y + eps },
+          endPt
+        ) -
           base) /
         eps;
     }
     if (opts.endFree) {
       grad.end.x =
-        (measureModelLength(model, startPt, { x: endPt.x + eps, y: endPt.y }) -
+        (measureModelLength(model, startPt, {
+          x: endPt.x + eps,
+          y: endPt.y,
+        }) -
           base) /
         eps;
       grad.end.y =
-        (measureModelLength(model, startPt, { x: endPt.x, y: endPt.y + eps }) -
+        (measureModelLength(model, startPt, {
+          x: endPt.x,
+          y: endPt.y + eps,
+        }) -
           base) /
         eps;
     }
@@ -2968,27 +3163,45 @@
       const left0 = parseFloat(el.style.left) || 0;
       const top0 = parseFloat(el.style.top) || 0;
       el.style.left = `${left0 + eps}px`;
-      const movedX = measureModelLength(model, startPt, endPt);
+      {
+        const pts = endpointsWithPulleyCenters(rope, startPt, endPt, pulley);
+        const movedX = measureModelLength(model, pts.start, pts.end);
+        grad.pulley.x = (movedX - base) / eps;
+      }
       el.style.left = `${left0}px`;
       el.style.top = `${top0 + eps}px`;
-      const movedY = measureModelLength(model, startPt, endPt);
+      {
+        const pts = endpointsWithPulleyCenters(rope, startPt, endPt, pulley);
+        const movedY = measureModelLength(model, pts.start, pts.end);
+        grad.pulley.y = (movedY - base) / eps;
+      }
       el.style.top = `${top0}px`;
-      grad.pulley.x = (movedX - base) / eps;
-      grad.pulley.y = (movedY - base) / eps;
     }
 
     return grad;
   }
 
   /**
-   * Síla lana na volnou kladku: napětí táhne kladku podél volných úseků
-   * (od tečného bodu směrem pryč od kola).
+   * Síla lana na volnou kladku: obepnutí (tečny) nebo tah za střed, pokud
+   * je konec lana přimknutý k ose.
    */
-  function freePulleyRopeForceUnit(attach) {
-    return {
-      x: -attach.freeEnterU.x + attach.freeLeaveU.x,
-      y: -attach.freeEnterU.y + attach.freeLeaveU.y,
-    };
+  function freePulleyRopeForceUnit(attach, rope, freePulley) {
+    const wrapFx = -attach.freeEnterU.x + attach.freeLeaveU.x;
+    const wrapFy = -attach.freeEnterU.y + attach.freeLeaveU.y;
+    if (Math.hypot(wrapFx, wrapFy) > 1e-8) {
+      return { x: wrapFx, y: wrapFy };
+    }
+    let fx = 0;
+    let fy = 0;
+    if (endpointIfPulleyCenter(rope, "start", freePulley)) {
+      fx += attach.startU.x;
+      fy += attach.startU.y;
+    }
+    if (endpointIfPulleyCenter(rope, "end", freePulley)) {
+      fx += attach.endU.x;
+      fy += attach.endU.y;
+    }
+    return { x: fx, y: fy };
   }
 
   /** Počet závaží zavěšených pod daným (včetně něj) — hang řetězec. */
@@ -3034,6 +3247,14 @@
         if (p && p.kind === "free" && !isDocked(p.el)) return p;
       }
     }
+    if (rope?.edgeSnap) {
+      for (const which of ["start", "end"]) {
+        const snap = rope.edgeSnap[which];
+        if (!isPulleyCenterSnap(snap) || !snap.pulleyId) continue;
+        const p = findPulleyById(snap.pulleyId);
+        if (p && p.kind === "free" && !isDocked(p.el)) return p;
+      }
+    }
     return null;
   }
 
@@ -3055,12 +3276,13 @@
     const pulleyMass = freePulleyMass(pulleyEl);
 
     const attach = getRopeAttachmentVectors(model, startPt, endPt);
-    const pulleyU = freePulleyRopeForceUnit(attach);
+    const pulleyU = freePulleyRopeForceUnit(attach, rope, freePulley);
     const grad = numericalLengthGradient(model, startPt, endPt, {
       startFree: !!startW,
       endFree: !!endW,
       pulleyFree: hasFree && pulleyMass > 1e-8,
       pulleyEl,
+      rope,
     });
 
     let numerator = 0;
@@ -3386,7 +3608,7 @@
     const activeWinch = startWinch || endWinch;
     if (activeWinch) {
       const canReel = tension < WINCH_MAX_FORCE - 1e-6;
-      setWinchWinding(activeWinch, canReel);
+      setWinchWinding(activeWinch, canReel ? "winding" : "overload");
       if (canReel) {
         const minLen = 40;
         rope.sim.restLength = Math.max(
@@ -3452,7 +3674,11 @@
       model,
       startPt,
       endPt,
-      rope.sim.restLength
+      rope.sim.restLength,
+      {
+        startFixed: !!startWinch || (isRopeEndOnEdge(rope, "start") && !startW),
+        endFixed: !!endWinch || (isRopeEndOnEdge(rope, "end") && !endW),
+      }
     );
 
     if (startWinch) {
@@ -3473,8 +3699,15 @@
         corrected.start,
         corrected.end,
         rope.sim.restLength,
-        freePulley
+        freePulley,
+        rope
       );
+      if (isRopeEndOnEdge(rope, "start") && !startW && !startWinch) {
+        corrected.start = getRopeEndPoint(rope, "start");
+      }
+      if (isRopeEndOnEdge(rope, "end") && !endW && !endWinch) {
+        corrected.end = getRopeEndPoint(rope, "end");
+      }
     }
 
     if (startW && corrected.start.y >= floorY - offS.y - 0.5) {
@@ -4183,8 +4416,8 @@
       }
       const p = stagePoint(e);
       const { width, height } = stageSize();
-      const w = winch.el.offsetWidth || 78;
-      const h = winch.el.offsetHeight || 65;
+      const w = winch.el.offsetWidth || 86;
+      const h = winch.el.offsetHeight || 57;
       winch.el.style.left = `${clamp(p.x - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(p.y - grabOffsetY, 0, Math.max(0, height - h))}px`;
       const snap = findWinchSnapTarget(winch);
@@ -4243,8 +4476,8 @@
         return;
       }
       const { rect, width, height } = stageSize();
-      const w = winch.el.offsetWidth || 78;
-      const h = winch.el.offsetHeight || 65;
+      const w = winch.el.offsetWidth || 86;
+      const h = winch.el.offsetHeight || 57;
       winch.el.style.left = `${clamp(ev.clientX - rect.left - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(ev.clientY - rect.top - grabOffsetY, 0, Math.max(0, height - h))}px`;
       const snap = findWinchSnapTarget(winch);
@@ -4423,6 +4656,12 @@
       setWinchWinding(wn, false);
     }
     rope.edgeSnap[which] = normalizeEndSnap(snap);
+    if (isPulleyCenterSnap(rope.edgeSnap[which]) && rope.edgeSnap[which].pulleyId) {
+      const pid = rope.edgeSnap[which].pulleyId;
+      if (rope.wrapIds) {
+        rope.wrapIds = rope.wrapIds.filter((id) => id !== pid);
+      }
+    }
     syncRopeEdgePoint(rope, which);
     rebuildRope(rope);
     if (handleEl) {
@@ -4590,34 +4829,48 @@
       return concatPoints(attachFrom.rope, attachFrom.which, points);
     }
 
-    function rememberStickyFromPoints(pts) {
-      let wraps = pickWrapEvents(simplify(pts, 0.9));
-      wraps = ensureWrapsAgainstCrossing(simplify(pts, 0.9), wraps);
+    function draftExcludeIds(endAnchorSnap) {
+      return pulleyCenterExcludeIds(
+        startEdgeSnap,
+        endAnchorSnap,
+        attachFrom?.rope?.edgeSnap?.start,
+        attachFrom?.rope?.edgeSnap?.end
+      );
+    }
+
+    function rememberStickyFromPoints(pts, excludeIds) {
+      const simplified = simplify(pts, 0.9);
+      let wraps = pickWrapEvents(simplified, excludeIds);
+      wraps = ensureWrapsAgainstCrossing(simplified, wraps, excludeIds);
       for (const w of wraps) {
         const id = w.wheel && w.wheel.id;
-        if (id && !stickyIds.includes(id)) stickyIds.push(id);
+        if (id && !excludeIds?.has(id) && !stickyIds.includes(id)) {
+          stickyIds.push(id);
+        }
       }
+      stickyIds = stickyIds.filter((id) => !excludeIds?.has(id));
     }
 
     function updateDraft() {
       if (!draft) return;
       const pts = effectivePoints();
-      rememberStickyFromPoints(pts);
-      const selfClose =
-        !attachFrom &&
-        pts.length >= 4 &&
-        dist(pts[pts.length - 1], pts[0]) <= CLOSE_SNAP_RADIUS;
       const endSnap = findSnapTarget(
         pts[pts.length - 1],
         attachFrom && attachFrom.rope
       );
+      const selfClose =
+        !attachFrom &&
+        pts.length >= 4 &&
+        dist(pts[pts.length - 1], pts[0]) <= CLOSE_SNAP_RADIUS;
       const endEdgeSnap =
         endSnap || selfClose ? null : findAnchorSnapTarget(pts[pts.length - 1]);
+      const exclude = draftExcludeIds(endEdgeSnap);
+      rememberStickyFromPoints(pts, exclude);
 
       if (selfClose) {
         showSnapMarker(pts[0]);
         draft.classList.add("is-snapping");
-        draft.setAttribute("d", buildRopePath(pts, true, stickyIds));
+        draft.setAttribute("d", buildRopePath(pts, true, stickyIds, exclude));
       } else if (endSnap) {
         showSnapMarker(endSnap.point);
         draft.classList.add("is-snapping");
@@ -4626,7 +4879,10 @@
           x: endSnap.point.x,
           y: endSnap.point.y,
         };
-        draft.setAttribute("d", buildRopePath(preview, false, stickyIds));
+        draft.setAttribute(
+          "d",
+          buildRopePath(preview, false, stickyIds, exclude)
+        );
       } else if (endEdgeSnap) {
         showSnapMarker(endEdgeSnap.point);
         draft.classList.add("is-snapping");
@@ -4635,11 +4891,14 @@
           x: endEdgeSnap.point.x,
           y: endEdgeSnap.point.y,
         };
-        draft.setAttribute("d", buildRopePath(preview, false, stickyIds));
+        draft.setAttribute(
+          "d",
+          buildRopePath(preview, false, stickyIds, exclude)
+        );
       } else {
         hideSnapMarker();
         draft.classList.remove("is-snapping");
-        draft.setAttribute("d", buildRopePath(pts, false, stickyIds));
+        draft.setAttribute("d", buildRopePath(pts, false, stickyIds, exclude));
       }
     }
 
@@ -4694,6 +4953,14 @@
       }
     });
 
+    function stickyForEdgeSnap(edgeSnapObj, ids) {
+      const exclude = pulleyCenterExcludeIds(
+        edgeSnapObj?.start,
+        edgeSnapObj?.end
+      );
+      return (ids || []).filter((id) => !exclude.has(id));
+    }
+
     function finish(e) {
       if (!drawing || (e && e.pointerId !== pointerId)) return;
       drawing = false;
@@ -4742,21 +5009,25 @@
         edgeSnap.end = normalizeEndSnap(endEdgeSnap);
       }
 
+      const exclude = draftExcludeIds(endEdgeSnap);
+      rememberStickyFromPoints(pts, exclude);
+      stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds);
+
       if (selfClose) {
         pts[pts.length - 1] = { x: pts[0].x, y: pts[0].y };
         closed = true;
         commitRope(draft, pts, true, null, stickyIds);
       } else if (endSnap) {
         ensureRopeEdgeSnap(endSnap.rope);
-        rememberStickyFromPoints(pts);
+        rememberStickyFromPoints(pts, exclude);
         if (endSnap.rope.wrapIds) {
           for (const k of endSnap.rope.wrapIds) {
-            if (!stickyIds.includes(k)) stickyIds.push(k);
+            if (!stickyIds.includes(k) && !exclude.has(k)) stickyIds.push(k);
           }
         }
         if (attachFrom && attachFrom.rope.wrapIds) {
           for (const k of attachFrom.rope.wrapIds) {
-            if (!stickyIds.includes(k)) stickyIds.push(k);
+            if (!stickyIds.includes(k) && !exclude.has(k)) stickyIds.push(k);
           }
         }
         const otherEdgeSnap = endSnap.rope.edgeSnap;
@@ -4785,6 +5056,7 @@
                 : otherEdgeSnap.end,
           };
         }
+        stickyIds = stickyForEdgeSnap(mergedEdge, stickyIds);
         removeRope(endSnap.rope);
         if (attachFrom) removeRope(attachFrom.rope);
         commitRope(draft, pts, false, mergedEdge, stickyIds);
@@ -4792,7 +5064,7 @@
         ensureRopeEdgeSnap(attachFrom.rope);
         if (attachFrom.rope.wrapIds) {
           for (const k of attachFrom.rope.wrapIds) {
-            if (!stickyIds.includes(k)) stickyIds.push(k);
+            if (!stickyIds.includes(k) && !exclude.has(k)) stickyIds.push(k);
           }
         }
         edgeSnap.start = attachFrom.rope.edgeSnap.start;
@@ -4803,9 +5075,11 @@
             ? normalizeEndSnap(endEdgeSnap)
             : attachFrom.rope.edgeSnap.end;
         }
+        stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds);
         removeRope(attachFrom.rope);
         commitRope(draft, pts, false, edgeSnap, stickyIds);
       } else {
+        stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds);
         commitRope(draft, pts, false, edgeSnap, stickyIds);
       }
 
@@ -5287,8 +5561,12 @@
     ropeLayer.addEventListener("pointerdown", onPointerDown, true);
   }
 
-  btnMove.addEventListener("click", () => setTool("move"));
-  btnPencil.addEventListener("click", () => setTool("pencil"));
+  if (btnRope) {
+    btnRope.addEventListener("click", () => {
+      if (tool === "pencil") setTool("move");
+      else setTool("pencil");
+    });
+  }
   btnRun.addEventListener("click", () => {
     if (tool === "run") setTool("move");
     else setTool("run");
@@ -5304,6 +5582,10 @@
   if (btnReset) btnReset.addEventListener("click", () => resetToPreRun());
   if (btnForces) {
     btnForces.addEventListener("click", () => setShowForces(!showForces));
+  }
+  if (pulleySizeSlider) {
+    pulleySizeSlider.addEventListener("input", onPulleySizeSliderInput);
+    setPulleyScale(Number(pulleySizeSlider.value) / 100);
   }
 
   enablePencil();
