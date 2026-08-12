@@ -29,6 +29,8 @@
         --pulley-fixed-max: 125px;
         --pulley-free-max: 116px;
         --weight-max: 78px;
+        --rope-stroke-width: 5.4px;
+        --rope-stroke-width-draft: 4.5px;
       }
 
       html,
@@ -239,16 +241,19 @@
         border-radius: 22px;
         background: #ffffff;
         overflow: hidden;
+        isolation: isolate;
       }
 
       #stage {
         position: relative;
         width: 100%;
         height: 100%;
+        border-radius: 20px;
         background: #ffffff;
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        overflow: hidden;
       }
 
       .app-root[data-tool="pencil"] #stage {
@@ -479,6 +484,10 @@
         overflow: visible;
       }
 
+      .app-root[data-tool="run"] #stage {
+        overflow: visible;
+      }
+
       .app-root[data-tool="run"] .pulley,
       .app-root[data-tool="run"] .weight,
       .app-root[data-tool="run"] #rope-layer {
@@ -519,14 +528,14 @@
       .rope-path {
         fill: none;
         stroke: #1d1d1b;
-        stroke-width: 6;
+        stroke-width: var(--rope-stroke-width);
         stroke-linecap: round;
         stroke-linejoin: round;
       }
 
       .rope-path.is-draft {
         stroke: #64748b;
-        stroke-width: 5;
+        stroke-width: var(--rope-stroke-width-draft);
         opacity: 0.8;
       }
 
@@ -748,7 +757,7 @@
             </button>
           </div>
           <div class="size-control">
-            <label class="panel-label" for="pulley-size-slider">Velikost kladek a závaží</label>
+            <label class="panel-label" for="pulley-size-slider">Velikost</label>
             <div class="size-control__row">
               <input
                 type="range"
@@ -760,7 +769,7 @@
                 aria-valuemin="40"
                 aria-valuemax="100"
                 aria-valuenow="90"
-                aria-label="Velikost kladek a závaží na ploše"
+                aria-label="Velikost kladek, závaží a lana na ploše"
               />
             </div>
           </div>
