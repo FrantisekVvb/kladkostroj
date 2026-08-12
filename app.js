@@ -108,9 +108,9 @@
   let physicsFrame = null;
   let lastPhysicsTime = 0;
   let forceLayer = null;
-  const FORCE_ARROW_MIN = 28;
-  const FORCE_ARROW_MAX = 200;
-  const FORCE_ARROW_UNIT_LEN = 68;
+  const FORCE_ARROW_MIN = 40;
+  const FORCE_ARROW_MAX = 300;
+  const FORCE_ARROW_UNIT_LEN = 110;
   /** @type {boolean} */
   let showForces = false;
 
@@ -3675,24 +3675,19 @@
     const hx2 = x2 - head * Math.cos(ang + 0.42);
     const hy2 = y2 - head * Math.sin(ang + 0.42);
 
-    // Zkrať dřík, ať špička nepřesahuje cílový bod
-    const tipBack = 5;
-    const shaftX2 = x2 - Math.cos(ang) * tipBack;
-    const shaftY2 = y2 - Math.sin(ang) * tipBack;
-
     const shaft = document.createElementNS("http://www.w3.org/2000/svg", "line");
     shaft.classList.add("force-arrow-shaft");
     shaft.setAttribute("x1", origin.x.toFixed(1));
     shaft.setAttribute("y1", origin.y.toFixed(1));
-    shaft.setAttribute("x2", shaftX2.toFixed(1));
-    shaft.setAttribute("y2", shaftY2.toFixed(1));
+    shaft.setAttribute("x2", x2.toFixed(1));
+    shaft.setAttribute("y2", y2.toFixed(1));
     g.appendChild(shaft);
 
-    const headEl = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    const headEl = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
     headEl.classList.add("force-arrow-head");
     headEl.setAttribute(
       "points",
-      `${x2.toFixed(1)},${y2.toFixed(1)} ${hx1.toFixed(1)},${hy1.toFixed(1)} ${hx2.toFixed(1)},${hy2.toFixed(1)}`
+      `${hx1.toFixed(1)},${hy1.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)} ${hx2.toFixed(1)},${hy2.toFixed(1)}`
     );
     g.appendChild(headEl);
 
