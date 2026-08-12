@@ -646,9 +646,12 @@
     return false;
   }
 
-  /** Lano může nést tah (kotva na konci, naviják, nebo obepnutí pevné kladky). */
+  /** Lano může nést tah — ukotvený konec, nebo obě zátěže přes pevnou kladku. */
   function ropeCanCarryTension(rope, model) {
-    return ropeHasAnchoredEnd(rope) || ropeWrapsFixedWheel(rope, model);
+    if (ropeHasAnchoredEnd(rope)) return true;
+    const startW = weightOnRopeEnd(rope, "start");
+    const endW = weightOnRopeEnd(rope, "end");
+    return !!(startW && endW && ropeWrapsFixedWheel(rope, model));
   }
 
   /** Synchronizuj body lana s háčky závaží přichycených ke koncům. */
@@ -744,7 +747,10 @@
     else syncRopeEndHandles();
   }
 
-  /** Nastaví měřítko kladek a závaží na ploše (0.4–1). Zachová středy / úchyty. */
+  const ROPE_STROKE_BASE = 6;
+  const ROPE_STROKE_DRAFT_BASE = 5;
+
+  /** Nastaví měřítko kladek, závaží a tloušťku lana na ploše (0.4–1). Zachová středy / úchyty. */
   function setPulleyScale(scale) {
     const next = clamp(scale, 0.4, 1);
     const freeAnchors = [];
@@ -765,6 +771,14 @@
     }
 
     document.documentElement.style.setProperty("--pulley-scale", String(next));
+    document.documentElement.style.setProperty(
+      "--rope-stroke-width",
+      `${ROPE_STROKE_BASE * next}px`
+    );
+    document.documentElement.style.setProperty(
+      "--rope-stroke-width-draft",
+      `${ROPE_STROKE_DRAFT_BASE * next}px`
+    );
 
     for (const anchor of freeAnchors) {
       const wheel = getWheelWorld(anchor.el, "free");
