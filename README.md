@@ -28,5 +28,5 @@ Otevři **http://localhost:3480**. Při úpravách souborů se stránka sama obn
 ## Ovládání
 
 - **Lano** (přepínač) — aktivní: kreslení lana; neaktivní: přesouvání kladek a závaží
-- **Spustit** — spustí / zastaví simulaci
+- **Spustit / Editor** — přepínač: spustí simulaci, nebo se vrátí do editoru
 - **Smazat lano** — guma smaže lana a objekty

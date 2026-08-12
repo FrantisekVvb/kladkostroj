@@ -140,7 +140,7 @@
       }
 
       .panel-actions--sim {
-        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-columns: 1fr 1fr;
       }
 
       .action-btn {
@@ -193,6 +193,40 @@
         border-color: #15803d;
         background: #15803d;
         color: #fff;
+      }
+
+      /* Přepínač ve stavu „Spustit“ — jemné zelené podbarvení */
+      #tool-run:not(.is-run):not(:disabled) {
+        border-color: #86efac;
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      #tool-run:not(.is-run):hover:not(:disabled) {
+        border-color: #4ade80;
+        background: #bbf7d0;
+        color: #14532d;
+      }
+
+      /* Reset — červené podbarvení */
+      #tool-reset:not(:disabled) {
+        border-color: #fca5a5;
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+
+      #tool-reset:hover:not(:disabled) {
+        border-color: #f87171;
+        background: #fecaca;
+        color: #991b1b;
+      }
+
+      #tool-reset:disabled {
+        opacity: 1;
+        border-color: #e8b4b4;
+        background: #f3d6d6;
+        color: #b07070;
+        cursor: not-allowed;
       }
 
       .action-btn:disabled {
@@ -1138,14 +1172,6 @@
               </button>
             </div>
             <div class="panel-actions panel-actions--sim" aria-label="Simulace">
-              <button
-                type="button"
-                id="tool-editor"
-                class="action-btn is-active"
-                aria-pressed="true"
-              >
-                Editor
-              </button>
               <button
                 type="button"
                 id="tool-run"

@@ -6,7 +6,6 @@
   const btnRope = document.getElementById("tool-rope");
   const btnFreehand = document.getElementById("tool-freehand");
   const btnRun = document.getElementById("tool-run");
-  const btnEditor = document.getElementById("tool-editor");
   const btnErase = document.getElementById("tool-erase");
   const btnUndo = document.getElementById("tool-undo");
   const btnReset = document.getElementById("tool-reset");
@@ -101,7 +100,7 @@
     return `${WEIGHT_SVG}<span class="weight-label" aria-hidden="true">${WEIGHT_LABEL_TEXT}</span>`;
   }
 
-  const WINCH_SVG = `<svg width="134" height="132" viewBox="0 0 134 132" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0.5" y="48.5" width="133" height="83" fill="#D9D9D9" stroke="black"/><circle cx="67" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M66.6989 80.4041C83.6555 80.4041 97.4015 66.6581 97.4015 49.7015C97.4015 32.745 83.6555 18.999 66.6989 18.999C49.7423 18.999 35.9963 32.745 35.9963 49.7015C35.9963 66.6581 49.7423 80.4041 66.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.7016 85.4031C86.419 85.4031 102.403 69.419 102.403 49.7016C102.403 29.9841 86.419 14 66.7016 14C46.9841 14 31 29.9841 31 49.7016C31 69.419 46.9841 85.4031 66.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M99.2331 49.7016C99.2331 67.665 84.6701 82.2335 66.7012 82.2335C48.7323 82.2335 34.1693 67.6705 34.1693 49.7016C34.1693 31.7327 48.7323 17.1697 66.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.9513 49.7234H93.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M47.7767 30.8317L85.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M85.5548 30.8317L47.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M41.8699 39.7641L91.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M76.614 24.9374L56.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M56.1691 25.1571L77.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M91.2219 39.2367L42.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="67" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/><text class="winch-force-text" x="67" y="119.5" text-anchor="middle" dominant-baseline="central" fill="#4A43E8" font-size="15" font-weight="700" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"></text></svg>`;
+  const WINCH_SVG = `<svg width="134" height="132" viewBox="0 0 134 132" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0.5" y="48.5" width="133" height="83" rx="12" ry="12" fill="#D9D9D9" stroke="black"/><circle cx="67" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M66.6989 80.4041C83.6555 80.4041 97.4015 66.6581 97.4015 49.7015C97.4015 32.745 83.6555 18.999 66.6989 18.999C49.7423 18.999 35.9963 32.745 35.9963 49.7015C35.9963 66.6581 49.7423 80.4041 66.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.7016 85.4031C86.419 85.4031 102.403 69.419 102.403 49.7016C102.403 29.9841 86.419 14 66.7016 14C46.9841 14 31 29.9841 31 49.7016C31 69.419 46.9841 85.4031 66.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M99.2331 49.7016C99.2331 67.665 84.6701 82.2335 66.7012 82.2335C48.7323 82.2335 34.1693 67.6705 34.1693 49.7016C34.1693 31.7327 48.7323 17.1697 66.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.9513 49.7234H93.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M47.7767 30.8317L85.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M85.5548 30.8317L47.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M41.8699 39.7641L91.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M76.614 24.9374L56.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M56.1691 25.1571L77.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M91.2219 39.2367L42.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="67" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/><text class="winch-force-text" x="67" y="119.5" text-anchor="middle" dominant-baseline="central" fill="#4A43E8" font-size="15" font-weight="700" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"></text></svg>`;
 
   const WINCH = {
     vbW: 134,
@@ -1325,7 +1324,6 @@
     const freehandOn = next === "freehand";
     const moveOn = next === "move";
     const runOn = next === "run";
-    const editorOn = !runOn;
     if (btnMove) {
       btnMove.classList.toggle("is-active", moveOn);
       btnMove.setAttribute("aria-pressed", String(moveOn));
@@ -1338,17 +1336,21 @@
       btnFreehand.classList.toggle("is-active", freehandOn);
       btnFreehand.setAttribute("aria-pressed", String(freehandOn));
     }
-    if (btnEditor) {
-      btnEditor.classList.toggle("is-active", editorOn);
-      btnEditor.setAttribute("aria-pressed", String(editorOn));
+    if (btnRun) {
+      btnRun.textContent = runOn ? "Editor" : "Spustit";
+      btnRun.classList.toggle("is-active", runOn);
+      btnRun.classList.toggle("is-run", runOn);
+      btnRun.setAttribute("aria-pressed", String(runOn));
+      btnRun.setAttribute(
+        "aria-label",
+        runOn ? "Zpět do editoru" : "Spustit simulaci"
+      );
+      btnRun.title = runOn ? "Editor" : "Spustit";
     }
-    btnRun.classList.toggle("is-active", runOn);
-    btnRun.classList.toggle("is-run", runOn);
     if (btnErase) {
       btnErase.classList.toggle("is-active", next === "erase");
       btnErase.setAttribute("aria-pressed", String(next === "erase"));
     }
-    btnRun.setAttribute("aria-pressed", String(runOn));
     if (next !== "move") clearPulleySelection();
     updateHistoryButtons();
   }
@@ -8087,14 +8089,12 @@
   if (btnFreehand) {
     btnFreehand.addEventListener("click", () => setTool("freehand"));
   }
-  if (btnEditor) {
-    btnEditor.addEventListener("click", () => {
+  if (btnRun) {
+    btnRun.addEventListener("click", () => {
       if (tool === "run") setTool("move");
+      else setTool("run");
     });
   }
-  btnRun.addEventListener("click", () => {
-    if (tool !== "run") setTool("run");
-  });
   if (btnErase) {
     btnErase.addEventListener("click", () => {
       setTool(tool === "erase" ? "move" : "erase");
