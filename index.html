@@ -381,8 +381,44 @@
 
       .pulley.is-selected {
         z-index: 4;
-        outline: 2px solid var(--accent);
-        outline-offset: 3px;
+      }
+
+      .pulley-resize-handle {
+        position: absolute;
+        z-index: 20;
+        width: 28px;
+        height: 28px;
+        margin-left: -14px;
+        margin-top: -14px;
+        border: 2px solid var(--accent);
+        border-radius: 50%;
+        background: #ffffff;
+        color: var(--accent);
+        box-shadow: 0 1px 6px rgba(15, 23, 42, 0.16);
+        cursor: ew-resize;
+        touch-action: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        line-height: 0;
+      }
+
+      .pulley-resize-handle[hidden] {
+        display: none !important;
+      }
+
+      .pulley-resize-handle svg {
+        display: block;
+        width: 14px;
+        height: 14px;
+        pointer-events: none;
+      }
+
+      .pulley-resize-handle.is-dragging,
+      .pulley-resize-handle:hover {
+        background: var(--accent);
+        color: #ffffff;
       }
 
       .pulley:active,
@@ -468,6 +504,26 @@
         height: auto;
       }
 
+      .weight-label {
+        position: absolute;
+        left: 50%;
+        top: 68%;
+        transform: translate(-50%, -50%);
+        font-size: calc(11px * var(--pulley-scale, 1));
+        font-weight: 700;
+        color: #ffffff;
+        letter-spacing: -0.02em;
+        pointer-events: none;
+        line-height: 1;
+        user-select: none;
+        white-space: nowrap;
+      }
+
+      .weight.is-docked .weight-label,
+      .weight.is-stock-template .weight-label {
+        font-size: 8px;
+      }
+
       .weight.is-docked svg,
       .weight.is-stock-template svg {
         width: 48px;
@@ -546,6 +602,35 @@
 
       .winch.is-winding .winch-drum {
         animation: winch-spin 2.8s linear infinite;
+      }
+
+      .winch-force-label {
+        position: absolute;
+        left: 50%;
+        top: 100%;
+        transform: translate(-50%, 4px);
+        padding: 2px 7px;
+        border-radius: 6px;
+        border: 1px solid #c4b5fd;
+        background: rgba(255, 255, 255, 0.94);
+        color: #7c3aed;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.2;
+        white-space: nowrap;
+        pointer-events: none;
+        z-index: 2;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+      }
+
+      .app-root:not([data-tool="run"]) .winch-force-label {
+        display: none !important;
+      }
+
+      .winch-force-label.is-at-max,
+      .winch-force-label.is-overloaded {
+        border-color: #fca5a5;
+        color: #dc2626;
       }
 
       @keyframes winch-spin {
