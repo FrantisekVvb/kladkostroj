@@ -52,6 +52,7 @@
         --readout-bg: #ffffff;
         --font-app: "Fenomen Sans", ui-sans-serif, system-ui, sans-serif;
         --pulley-scale: 0.9;
+        --stock-tray-scale: 1;
         --pulley-fixed-max: 125px;
         --pulley-free-max: 116px;
         --weight-max: 78px;
@@ -123,6 +124,23 @@
 
       .panel-actions--tools {
         grid-template-columns: 1fr 1fr 1fr auto;
+      }
+
+      .panel-tools {
+        display: grid;
+        gap: 8px;
+      }
+
+      .panel-actions--tools-primary {
+        grid-template-columns: auto 1fr 1fr;
+      }
+
+      .panel-actions--tools-meta {
+        grid-template-columns: auto 1fr 1fr;
+      }
+
+      .panel-actions--sim {
+        grid-template-columns: 1fr 1fr 1fr;
       }
 
       .action-btn {
@@ -204,16 +222,17 @@
         padding: 12px;
         min-height: 0;
         flex: 1;
-        overflow: auto;
-        -webkit-overflow-scrolling: touch;
+        overflow: hidden;
       }
 
-      .panel-label {
-        font-size: 0.78rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--muted);
+      .stock-scaler {
+        flex: 0 0 auto;
+        min-height: 0;
+        width: 100%;
+        overflow: visible;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
       }
 
       .stock-tray {
@@ -225,11 +244,23 @@
         background: var(--area-muted);
         min-height: 120px;
         align-content: start;
+        width: 100%;
+        transform: scale(var(--stock-tray-scale, 1));
+        transform-origin: top center;
+        will-change: transform;
       }
 
       .stock-tray.is-drop-target {
         border-color: #58a1ff;
         background: #eef5ff;
+      }
+
+      .panel-label {
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
       }
 
       .stock-slot {
@@ -288,7 +319,8 @@
       }
 
       .app-root[data-tool="pencil"] .stock-section,
-      .app-root[data-tool="freehand"] .stock-section {
+      .app-root[data-tool="freehand"] .stock-section,
+      .app-root[data-tool="run"] .stock-section {
         opacity: 0.45;
         filter: grayscale(0.35);
         pointer-events: none;
@@ -700,6 +732,12 @@
         animation: rope-end-pulse 1.6s ease-in-out infinite;
       }
 
+      .app-root[data-tool="freehand"] .rope-end-handle.is-pencil-hint {
+        fill: rgba(239, 68, 68, 0.38);
+        stroke: #dc2626;
+        animation: rope-end-pulse-freehand 1.6s ease-in-out infinite;
+      }
+
       @keyframes rope-end-pulse {
         0%,
         100% {
@@ -708,6 +746,18 @@
         }
         50% {
           fill: rgba(34, 197, 94, 0.5);
+          stroke-opacity: 1;
+        }
+      }
+
+      @keyframes rope-end-pulse-freehand {
+        0%,
+        100% {
+          fill: rgba(239, 68, 68, 0.28);
+          stroke-opacity: 0.85;
+        }
+        50% {
+          fill: rgba(239, 68, 68, 0.5);
           stroke-opacity: 1;
         }
       }
@@ -854,73 +904,112 @@
       <aside class="left-panel" aria-label="Ovládání simulace">
         <div class="panel-copy">
           <h1 class="panel-title">Kladkostroj</h1>
-          <div class="panel-actions" aria-label="Simulace">
-            <button type="button" id="tool-undo" class="action-btn" disabled>
-              Zpět
-            </button>
-            <button
-              type="button"
-              id="tool-run"
-              class="action-btn"
-              aria-pressed="false"
-            >
-              Spustit
-            </button>
-            <button type="button" id="tool-reset" class="action-btn" disabled>
-              Reset
-            </button>
-          </div>
-          <div class="panel-actions panel-actions--tools" aria-label="Nástroje">
-            <button
-              type="button"
-              id="tool-rope"
-              class="action-btn"
-              aria-pressed="false"
-            >
-              Lano
-            </button>
-            <button
-              type="button"
-              id="tool-freehand"
-              class="action-btn"
-              aria-pressed="false"
-            >
-              Tužka
-            </button>
-            <button
-              type="button"
-              id="toggle-forces"
-              class="action-btn"
-              aria-pressed="false"
-            >
-              Síly
-            </button>
-            <button
-              type="button"
-              id="tool-erase"
-              class="action-btn action-btn--icon"
-              aria-pressed="false"
-              aria-label="Guma"
-              title="Guma"
-            >
-              <span class="action-btn__icon" aria-hidden="true">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path
-                    d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"
-                  />
-                  <path d="M22 21H7" />
-                  <path d="m5 11 9 9" />
-                </svg>
-              </span>
-            </button>
+          <div class="panel-tools" aria-label="Nástroje">
+            <div class="panel-actions panel-actions--tools-meta">
+              <button
+                type="button"
+                id="tool-erase"
+                class="action-btn action-btn--icon"
+                aria-pressed="false"
+                aria-label="Guma"
+                title="Guma"
+              >
+                <span class="action-btn__icon" aria-hidden="true">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path
+                      d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"
+                    />
+                    <path d="M22 21H7" />
+                    <path d="m5 11 9 9" />
+                  </svg>
+                </span>
+              </button>
+              <button
+                type="button"
+                id="toggle-forces"
+                class="action-btn"
+                aria-pressed="false"
+              >
+                Síly
+              </button>
+              <button type="button" id="tool-undo" class="action-btn" disabled>
+                Zpět
+              </button>
+            </div>
+            <div class="panel-actions panel-actions--tools-primary">
+              <button
+                type="button"
+                id="tool-move"
+                class="action-btn action-btn--icon is-active"
+                aria-pressed="true"
+                aria-label="Posun"
+                title="Posun"
+              >
+                <span class="action-btn__icon" aria-hidden="true">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
+                    <path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v2" />
+                    <path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8" />
+                    <path
+                      d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"
+                    />
+                  </svg>
+                </span>
+              </button>
+              <button
+                type="button"
+                id="tool-rope"
+                class="action-btn"
+                aria-pressed="false"
+              >
+                Lano
+              </button>
+              <button
+                type="button"
+                id="tool-freehand"
+                class="action-btn"
+                aria-pressed="false"
+              >
+                Tužka
+              </button>
+            </div>
+            <div class="panel-actions panel-actions--sim" aria-label="Simulace">
+              <button
+                type="button"
+                id="tool-editor"
+                class="action-btn is-active"
+                aria-pressed="true"
+              >
+                Editor
+              </button>
+              <button
+                type="button"
+                id="tool-run"
+                class="action-btn"
+                aria-pressed="false"
+              >
+                Spustit
+              </button>
+              <button type="button" id="tool-reset" class="action-btn" disabled>
+                Reset
+              </button>
+            </div>
           </div>
           <div class="size-control">
             <label class="panel-label" for="pulley-size-slider">Velikost</label>
@@ -942,6 +1031,7 @@
         </div>
 
         <div class="stock-section">
+          <div class="stock-scaler" id="stock-scaler">
           <div class="stock-tray" id="stock-tray" aria-label="Kladky a závaží">
             <div class="stock-slot" id="stock-slot-fixed" data-slot="fixed">
               <span class="stock-slot__label">Pevná kladka</span>
@@ -1046,6 +1136,7 @@
             >
               <span class="stock-slot__label">Naviják</span>
             </div>
+          </div>
           </div>
         </div>
       </aside>
