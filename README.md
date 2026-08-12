@@ -6,14 +6,15 @@ Dvě kladky na bílém pozadí — **červená pevná** a **modrá volná**.
 
 **[Otevřít simulaci](https://frantisekvvb.github.io/kladkostroj/)**
 
-Po pushi na `main` se stránka nasadí automaticky (větev `gh-pages`). První nasazení může trvat 1–2 minuty.
+Po pushi na `main` se stránka nasadí automaticky přes GitHub Actions. První nasazení může trvat 1–2 minuty.
 
-**Jednorázové nastavení v GitHubu** (pokud odkaz nefunguje):
+**Jednorázové nastavení v GitHubu** (pokud odkaz vrací 404):
 
-1. Repozitář → **Settings** → **Pages**
-2. U *Build and deployment* zvol **Deploy from a branch**
-3. Branch: **gh-pages** / **/(root)**
-4. Ulož a počkej cca minutu
+1. Otevři [Settings → Pages](https://github.com/FrantisekVvb/kladkostroj/settings/pages)
+2. U *Build and deployment* → *Source* zvol **GitHub Actions**
+3. Po dalším pushi na `main` (nebo ručním spuštění workflow *Deploy to GitHub Pages*) bude stránka dostupná
+
+Alternativa: *Deploy from a branch* → větev **gh-pages** → složka **/(root)**.
 
 ## Spuštění lokálně
 

@@ -6,7 +6,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages
@@ -14,13 +16,28 @@ concurrency:
 
 jobs:
   deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Publish static site to gh-pages
-        uses: JamesIves/github-pages-deploy-action@v4
+
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp index.html app.js _site/
+          cp -r assets _site/
+          cp .nojekyll _site/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          branch: gh-pages
-          folder: .
-          clean: true
-          exclude: .git/**,.github/**,.gitignore,README.md,package.json,node_modules/**
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
