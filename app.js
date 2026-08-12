@@ -139,6 +139,10 @@
   /** @type {string | null} */
   let selectedPulleyId = null;
   const PULLEY_CLICK_MOVE_PX = 6;
+  const PULLEY_SCALE_MIN = 0.4;
+  const PULLEY_SCALE_MAX = 1;
+  /** Globální měřítko kladek, závaží, navijáku a lana na ploše. */
+  let globalStageScale = 0.9;
 
   const HISTORY_MAX = 40;
   /** @type {object[]} */
@@ -192,10 +196,11 @@
       pulleySeq,
       weightSeq,
       winchSeq,
+      globalStageScale,
       pulleys: pulleys.map((p) => ({
         id: p.id,
         kind: p.kind,
-        scale: getPulleyInstanceScale(p),
+        relativeScale: getPulleyRelativeScale(p),
         left: p.el.style.left || "",
         top: p.el.style.top || "",
         transform: p.el.style.transform || "",
@@ -329,6 +334,12 @@
     pulleySeq = snap.pulleySeq || 0;
     weightSeq = snap.weightSeq || 0;
     winchSeq = snap.winchSeq || 0;
+    if (snap.globalStageScale != null && !Number.isNaN(snap.globalStageScale)) {
+      applyGlobalStageScale(snap.globalStageScale, {
+        skipRebuild: true,
+        skipSlider: true,
+      });
+    }
 
     for (const ps of snap.pulleys || []) {
       const pulley = createPulleyInstance(ps.kind, { id: ps.id });
@@ -341,10 +352,16 @@
       if (ps.along != null && !Number.isNaN(ps.along)) {
         el.dataset.along = String(ps.along);
       }
-      if (ps.scale != null && !Number.isNaN(ps.scale)) {
-        pulley.scale = clamp(ps.scale, 0.4, 1);
-        el.style.setProperty("--pulley-scale", String(pulley.scale));
+      if (ps.relativeScale != null && !Number.isNaN(ps.relativeScale)) {
+        pulley.relativeScale = ps.relativeScale;
+      } else if (ps.scale != null && !Number.isNaN(ps.scale)) {
+        const baseGlobal =
+          snap.globalStageScale != null && !Number.isNaN(snap.globalStageScale)
+            ? snap.globalStageScale
+            : 0.9;
+        pulley.relativeScale = ps.scale / baseGlobal;
       }
+      applyPulleyCssScale(pulley, { adjustPosition: false });
       if (ps.kind === "free") {
         enableFreeDrag(el);
       } else {
@@ -457,20 +474,24 @@
   function syncPulleySizeSliderState() {
     if (!pulleySizeSlider) return;
     const pulley = findSelectedPulley();
-    const canResize = !!(
-      pulley &&
-      !isDocked(pulley.el) &&
-      !pulleyHasAttachedRope(pulley) &&
-      tool === "move" &&
-      !running
-    );
-    pulleySizeSlider.disabled = !canResize;
+    const canIndividual = pulleyCanResize(pulley);
+    const canGlobal = tool === "move" && !running;
+    pulleySizeSlider.disabled = !(canIndividual || canGlobal);
     const control = pulleySizeSlider.closest(".size-control");
-    if (control) control.classList.toggle("is-disabled", !canResize);
-    if (pulley) {
-      const pct = Math.round(getPulleyInstanceScale(pulley) * 100);
+    if (control) control.classList.toggle("is-disabled", pulleySizeSlider.disabled);
+    if (canIndividual) {
+      const pct = Math.round(getPulleyEffectiveScale(pulley) * 100);
       pulleySizeSlider.value = String(pct);
       pulleySizeSlider.setAttribute("aria-valuenow", String(pct));
+      pulleySizeSlider.setAttribute("aria-label", "Velikost vybrané kladky");
+    } else if (canGlobal) {
+      const pct = Math.round(globalStageScale * 100);
+      pulleySizeSlider.value = String(pct);
+      pulleySizeSlider.setAttribute("aria-valuenow", String(pct));
+      pulleySizeSlider.setAttribute(
+        "aria-label",
+        "Celková velikost kladek, závaží a lana na ploše"
+      );
     }
     syncPulleyResizeHandle();
   }
@@ -479,18 +500,31 @@
     return selectedPulleyId ? findPulleyById(selectedPulleyId) : null;
   }
 
-  function getPulleyInstanceScale(pulley) {
-    if (pulley?.scale != null) return pulley.scale;
+  function getPulleyRelativeScale(pulley) {
+    if (pulley?.relativeScale != null && !Number.isNaN(pulley.relativeScale)) {
+      return pulley.relativeScale;
+    }
+    if (pulley?.scale != null && !Number.isNaN(pulley.scale)) {
+      return pulley.scale / globalStageScale;
+    }
     const inline = pulley?.el?.style.getPropertyValue("--pulley-scale");
     if (inline) {
       const parsed = parseFloat(inline);
-      if (!Number.isNaN(parsed)) return parsed;
+      if (!Number.isNaN(parsed)) return parsed / globalStageScale;
     }
-    const computed = pulley?.el
-      ? parseFloat(getComputedStyle(pulley.el).getPropertyValue("--pulley-scale"))
-      : NaN;
-    if (!Number.isNaN(computed)) return computed;
-    return 0.9;
+    return 1;
+  }
+
+  function getPulleyEffectiveScale(pulley) {
+    return clamp(
+      getPulleyRelativeScale(pulley) * globalStageScale,
+      PULLEY_SCALE_MIN,
+      PULLEY_SCALE_MAX
+    );
+  }
+
+  function getPulleyInstanceScale(pulley) {
+    return getPulleyEffectiveScale(pulley);
   }
 
   function pulleyHasAttachedRope(pulley) {
@@ -584,7 +618,7 @@
       if (!pulley) return;
       const dx = e.clientX - pulleyResizeDrag.startX;
       const next = clamp(pulleyResizeDrag.startScale + dx / 220, 0.4, 1);
-      setPulleyInstanceScale(pulley, next);
+      setPulleyEffectiveScale(pulley, next);
       if (pulleySizeSlider && !pulleySizeSlider.disabled) {
         pulleySizeSlider.value = String(Math.round(next * 100));
         pulleySizeSlider.setAttribute("aria-valuenow", String(Math.round(next * 100)));
@@ -1031,29 +1065,83 @@
   }
 
   /**
-   * Vyloučení obepnutí kvůli středu kladky.
-   * Střed–střed mezi různými kladkami: vždy vyluč.
-   * Jeden konec ve středu: povol obepnutí téže kladky, pokud tah opravdu obepíná.
+   * Obepnutí kladky P hned u konce upevněného ve středu P odstraň —
+   * z přimknutí jde lano rovně. Obepnutí P dál po laně (až po jiné kladce) nech.
+   */
+  function stripCenterAdjacentWraps(wraps, ...snaps) {
+    if (!wraps?.length) return wraps || [];
+    const result = wraps.slice();
+    const startSnap = normalizeEndSnap(snaps[0]);
+    const endSnap = normalizeEndSnap(snaps[1]);
+
+    if (isPulleyCenterSnap(startSnap) && startSnap.pulleyId) {
+      while (
+        result.length &&
+        (result[0].wheel?.id || result[0].wheelId) === startSnap.pulleyId
+      ) {
+        result.shift();
+      }
+    }
+    if (isPulleyCenterSnap(endSnap) && endSnap.pulleyId) {
+      while (
+        result.length &&
+        (result[result.length - 1].wheel?.id ||
+          result[result.length - 1].wheelId) === endSnap.pulleyId
+      ) {
+        result.pop();
+      }
+    }
+    return result;
+  }
+
+  /** Tah od středu P se dřív dotkne jiné kladky než jen P. */
+  function strokeTouchesOtherPulleyFromCenter(pts, wrapIds, pulleyId) {
+    if (!pulleyId) return false;
+    for (const id of wrapIds || []) {
+      if (id && id !== pulleyId) return true;
+    }
+    if (!pts || pts.length < 2) return false;
+    const simplified = simplify(pts, 0.9);
+    const wraps = pickWrapEvents(
+      simplified.length >= 2 ? simplified : pts,
+      null
+    );
+    return wraps.some((w) => {
+      const id = w.wheel?.id ?? w.wheelId;
+      return id && id !== pulleyId;
+    });
+  }
+
+  /**
+   * Vyloučení obepnutí u středu kladky.
+   * Platí jen když od přimknutí ve středu nevede tah přes jinou kladku —
+   * pak se P neobepíná a lano jde rovně ze středu.
+   * Pokud tah nejdřív míří jinou kladku, P se z exclude vyřadí, aby mohlo
+   * být obepnuto dál po laně; přilehlé obepnutí u středu se ořeže zvlášť.
    */
   function pulleyCenterExcludeIdsForStroke(pts, wrapIds, ...snaps) {
     const ids = pulleyCenterExcludeIds(...snaps);
     if (isCenterToCenterRope(...snaps)) return ids;
 
-    const sticky = wrapIds || [];
     for (const snap of snaps) {
-      if (!snap) continue;
       const normalized = normalizeEndSnap(snap);
       if (!isPulleyCenterSnap(normalized) || !normalized.pulleyId) continue;
       const pid = normalized.pulleyId;
-      if (sticky.includes(pid)) {
-        ids.delete(pid);
-        continue;
-      }
-      if (pts && pts.length >= 2 && strokeWrapsPulley(pts, pid)) {
+      if (strokeTouchesOtherPulleyFromCenter(pts, wrapIds, pid)) {
         ids.delete(pid);
       }
     }
     return ids;
+  }
+
+  function isPointAtPulleyCenter(p) {
+    return !!findPulleyCenterSnapTarget(p);
+  }
+
+  function wheelIsCenterAttachedEndpoint(wheel, point) {
+    if (!wheel || !point) return false;
+    const hub = findWheelHubAtPoint(point);
+    return !!(hub && sameWheel(hub, wheel));
   }
 
   function distToWheelCenter(p, wheel) {
@@ -1230,8 +1318,9 @@
   }
 
   /** Globální měřítko závaží, navijáku a tloušťky lana na ploše. */
-  function applyGlobalStageScale(scale) {
-    const next = clamp(scale, 0.4, 1);
+  function applyGlobalStageScale(scale, opts = {}) {
+    const next = clamp(scale, PULLEY_SCALE_MIN, PULLEY_SCALE_MAX);
+    globalStageScale = next;
     document.documentElement.style.setProperty("--pulley-scale", String(next));
     document.documentElement.style.setProperty(
       "--end-handle-r",
@@ -1246,17 +1335,30 @@
       `${ROPE_STROKE_DRAFT_BASE * next}px`
     );
     syncRopeViewBox();
+
+    for (const pulley of pulleys) {
+      if (isDocked(pulley.el)) continue;
+      applyPulleyCssScale(pulley);
+    }
+
+    if (!opts.skipRebuild) {
+      rebuildAllRopes();
+      syncAllWeightsToSnap();
+      updateForceArrows();
+    }
+    syncPulleyResizeHandle();
+    if (!opts.skipSlider) syncPulleySizeSliderState();
   }
 
-  /** Nastaví měřítko vybrané kladky (0.4–1). Zachová střed kola / kotvení na okraji. */
-  function setPulleyInstanceScale(pulley, scale) {
-    if (!pulley || pulleyHasAttachedRope(pulley)) return;
-    const next = clamp(scale, 0.4, 1);
+  function applyPulleyCssScale(pulley, opts = {}) {
+    if (!pulley || isDocked(pulley.el)) return;
+    const effective = getPulleyEffectiveScale(pulley);
     const wheelBefore =
-      pulley.kind === "free" ? getWheelWorld(pulley.el, "free") : null;
+      opts.adjustPosition !== false && pulley.kind === "free"
+        ? getWheelWorld(pulley.el, "free")
+        : null;
 
-    pulley.scale = next;
-    pulley.el.style.setProperty("--pulley-scale", String(next));
+    pulley.el.style.setProperty("--pulley-scale", String(effective));
 
     if (wheelBefore) {
       const wheelAfter = getWheelWorld(pulley.el, "free");
@@ -1264,10 +1366,21 @@
       const top = parseFloat(pulley.el.style.top) || 0;
       pulley.el.style.left = `${left + (wheelBefore.cx - wheelAfter.cx)}px`;
       pulley.el.style.top = `${top + (wheelBefore.cy - wheelAfter.cy)}px`;
-    } else if (typeof pulley.el._fixedResizeHandler === "function") {
+    } else if (
+      opts.adjustPosition !== false &&
+      typeof pulley.el._fixedResizeHandler === "function"
+    ) {
       pulley.el._fixedResizeHandler();
     }
+  }
 
+  /** Nastaví efektivní měřítko vybrané kladky a uloží poměr vůči globálnímu. */
+  function setPulleyEffectiveScale(pulley, effectiveScale) {
+    if (!pulley || pulleyHasAttachedRope(pulley)) return;
+    const effective = clamp(effectiveScale, PULLEY_SCALE_MIN, PULLEY_SCALE_MAX);
+    pulley.relativeScale = effective / globalStageScale;
+    delete pulley.scale;
+    applyPulleyCssScale(pulley);
     rebuildAllRopes();
     syncAllWeightsToSnap();
     updateForceArrows();
@@ -1277,11 +1390,15 @@
 
   function onPulleySizeSliderInput() {
     if (!pulleySizeSlider || pulleySizeSlider.disabled) return;
-    const pulley = findSelectedPulley();
-    if (!pulley) return;
     runBlocked = false;
     updateHistoryButtons();
-    setPulleyInstanceScale(pulley, Number(pulleySizeSlider.value) / 100);
+    const val = Number(pulleySizeSlider.value) / 100;
+    const pulley = findSelectedPulley();
+    if (pulleyCanResize(pulley)) {
+      setPulleyEffectiveScale(pulley, val);
+    } else {
+      applyGlobalStageScale(val);
+    }
   }
 
   function isDocked(el) {
@@ -1348,10 +1465,10 @@
       "aria-label",
       kind === "fixed" ? "Pevná kladka" : "Volná kladka"
     );
-    const pulley = { el, kind, id, vel: { x: 0, y: 0 }, scale: 0.9 };
+    const pulley = { el, kind, id, vel: { x: 0, y: 0 }, relativeScale: 1 };
     pulleys.push(pulley);
     stage.appendChild(el);
-    el.style.setProperty("--pulley-scale", "0.9");
+    applyPulleyCssScale(pulley, { adjustPosition: false });
     bindPulleySelectOnClick(el);
     return pulley;
   }
@@ -2858,6 +2975,11 @@
       wraps = mergeStickyWraps(pts, wraps, sticky);
     }
     wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
+    wraps = stripCenterAdjacentWraps(
+      wraps,
+      opts.edgeSnap?.start,
+      opts.edgeSnap?.end
+    );
 
     if (!wraps.length) {
       const a = pts[0];
@@ -2866,7 +2988,10 @@
       if (!opts.preserveWraps) {
         const hitWheel = collectWheels().find(
           (w) =>
-            !wheelExcludedFromWrap(w, exclude) && segmentCrossesWheel(a, b, w, 1)
+            !wheelExcludedFromWrap(w, exclude) &&
+            !wheelIsCenterAttachedEndpoint(w, a) &&
+            !wheelIsCenterAttachedEndpoint(w, b) &&
+            segmentCrossesWheel(a, b, w, 1)
         );
         if (hitWheel) {
           const cw = wrapDirection(pts, 0, pts.length - 1, hitWheel) === "cw";
@@ -2934,6 +3059,11 @@
       if (needsRetry) {
         wraps = mergeStickyWraps(pts, wraps, extraIds);
         wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
+        wraps = stripCenterAdjacentWraps(
+          wraps,
+          opts.edgeSnap?.start,
+          opts.edgeSnap?.end
+        );
         geom = solveWrapGeometry(wraps, pts, closed);
       }
     }
@@ -3008,6 +3138,11 @@
       wraps = mergeStickyWraps(pts, wraps, sticky);
     }
     wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
+    wraps = stripCenterAdjacentWraps(
+      wraps,
+      rope.edgeSnap?.start,
+      rope.edgeSnap?.end
+    );
 
     if (!wraps.length) return { wraps: [], closed: rope.closed };
 
@@ -3339,7 +3474,12 @@
       if (d) d += " Z";
     } else {
       const hubWheel = findWheelHubAtPoint(endPt);
-      if (hubWheel && pen && segmentCrossesWheel(pen, endPt, hubWheel, 1)) {
+      if (
+        hubWheel &&
+        pen &&
+        !isPointAtPulleyCenter(endPt) &&
+        segmentCrossesWheel(pen, endPt, hubWheel, 1)
+      ) {
         const ang = Math.atan2(pen.y - hubWheel.cy, pen.x - hubWheel.cx);
         lineTo(pointOnCircle(hubWheel, ang));
       }
@@ -5420,13 +5560,16 @@
     ensureRopeEdgeSnap(rope);
     const startSnap = rope.edgeSnap.start;
     const endSnap = rope.edgeSnap.end;
-    if (!isPulleyCenterSnap(startSnap) || !isPulleyCenterSnap(endSnap)) return;
+    const startCenter = isPulleyCenterSnap(startSnap);
+    const endCenter = isPulleyCenterSnap(endSnap);
+    if (!startCenter && !endCenter) return;
 
     const startPt = getRopeEndPoint(rope, "start");
     const endPt = getRopeEndPoint(rope, "end");
 
-    // Dvě různé kladky: vždy přímé lano střed–střed
     if (
+      startCenter &&
+      endCenter &&
       startSnap.pulleyId &&
       endSnap.pulleyId &&
       startSnap.pulleyId !== endSnap.pulleyId
@@ -5452,7 +5595,7 @@
     if (model.wraps.length > 0) return;
 
     rope.points = [startPt, endPt];
-    rope.wrapIds = [];
+    rope.wrapIds = (rope.wrapIds || []).filter((id) => !exclude.has(id));
   }
 
   function commitRope(el, points, closed, edgeSnap, stickyIds) {
@@ -5464,7 +5607,9 @@
       nextEdge.end
     );
     const filteredSticky = (stickyIds || []).filter((id) => !exclude.has(id));
-    const d = buildRopePath(points, closed, filteredSticky, exclude);
+    const d = buildRopePath(points, closed, filteredSticky, exclude, {
+      edgeSnap: nextEdge,
+    });
     el.classList.remove("is-draft", "is-snapping");
     el.setAttribute("d", d);
     if (closed) el.dataset.closed = "true";
@@ -5479,11 +5624,17 @@
       wrapIds: filteredSticky.slice(),
     };
     const model = computeRopeModel(draft);
+    const modelIds = model.wraps.map((w) => w.wheelId).filter(Boolean);
+    // Sticky zachovej jen pokud po ořezu sousedního středového obepnutí zůstalo v modelu
     const wrapIds = (
       filteredSticky.length
-        ? filteredSticky.slice()
-        : model.wraps.map((w) => w.wheelId).filter(Boolean)
+        ? filteredSticky.filter((id) => modelIds.includes(id))
+        : modelIds
     ).filter((id) => !exclude.has(id));
+    // Pokud model má obepnutí (např. střední obepnutí téže kladky), přidej je
+    for (const id of modelIds) {
+      if (!wrapIds.includes(id)) wrapIds.push(id);
+    }
 
     if (existing) {
       existing.points = points;
@@ -5520,7 +5671,9 @@
       }
       rope.el.setAttribute(
         "d",
-        buildRopePath(renderPts, rope.closed, rope.wrapIds, excludeAfter)
+        buildRopePath(renderPts, rope.closed, rope.wrapIds, excludeAfter, {
+          edgeSnap: rope.edgeSnap,
+        })
       );
     }
     syncRopeCount();
@@ -5659,8 +5812,29 @@
     rope.edgeSnap[which] = normalizeEndSnap(snap);
     if (isPulleyCenterSnap(rope.edgeSnap[which]) && rope.edgeSnap[which].pulleyId) {
       const pid = rope.edgeSnap[which].pulleyId;
-      if (rope.wrapIds && !strokeWrapsPulley(rope.points, pid)) {
+      const exclude = pulleyCenterExcludeIdsForStroke(
+        rope.points,
+        rope.wrapIds,
+        rope.edgeSnap.start,
+        rope.edgeSnap.end
+      );
+      // Odstraň P z wrapIds jen když od středu nevede tah přes jinou kladku
+      if (exclude.has(pid) && rope.wrapIds) {
         rope.wrapIds = rope.wrapIds.filter((id) => id !== pid);
+      } else if (rope.wrapIds) {
+        // I při jiné kladce ořež přilehlé obepnutí u středu z topologie sticky
+        const probe = pickWrapEvents(simplify(rope.points, 0.9), null);
+        const kept = stripCenterAdjacentWraps(
+          probe,
+          rope.edgeSnap.start,
+          rope.edgeSnap.end
+        );
+        const keptIds = new Set(
+          kept.map((w) => w.wheel?.id || w.wheelId).filter(Boolean)
+        );
+        if (!keptIds.has(pid)) {
+          rope.wrapIds = rope.wrapIds.filter((id) => id !== pid);
+        }
       }
     }
     syncRopeEdgePoint(rope, which);
@@ -5845,10 +6019,11 @@
       );
     }
 
-    function rememberStickyFromPoints(pts, excludeIds) {
+    function rememberStickyFromPoints(pts, excludeIds, endAnchorSnap) {
       const simplified = simplify(pts, 0.9);
       let wraps = pickWrapEvents(simplified, excludeIds);
       wraps = ensureWrapsAgainstCrossing(simplified, wraps, excludeIds);
+      wraps = stripCenterAdjacentWraps(wraps, startEdgeSnap, endAnchorSnap);
       for (const w of wraps) {
         const id = w.wheel && w.wheel.id;
         if (id && !excludeIds?.has(id) && !stickyIds.includes(id)) {
@@ -5872,12 +6047,18 @@
       const endEdgeSnap =
         endSnap || selfClose ? null : findAnchorSnapTarget(pts[pts.length - 1]);
       const exclude = draftExcludeIds(pts, endEdgeSnap);
-      rememberStickyFromPoints(pts, exclude);
+      rememberStickyFromPoints(pts, exclude, endEdgeSnap);
+      const pathOpts = {
+        edgeSnap: { start: startEdgeSnap, end: endEdgeSnap },
+      };
 
       if (selfClose) {
         showSnapMarker(pts[0]);
         draft.classList.add("is-snapping");
-        draft.setAttribute("d", buildRopePath(pts, true, stickyIds, exclude));
+        draft.setAttribute(
+          "d",
+          buildRopePath(pts, true, stickyIds, exclude, pathOpts)
+        );
       } else if (endSnap) {
         showSnapMarker(endSnap.point);
         draft.classList.add("is-snapping");
@@ -5888,7 +6069,7 @@
         };
         draft.setAttribute(
           "d",
-          buildRopePath(preview, false, stickyIds, exclude)
+          buildRopePath(preview, false, stickyIds, exclude, pathOpts)
         );
       } else if (endEdgeSnap) {
         showSnapMarker(endEdgeSnap.point);
@@ -5900,12 +6081,20 @@
         };
         draft.setAttribute(
           "d",
-          buildRopePath(preview, false, stickyIds, exclude)
+          buildRopePath(preview, false, stickyIds, exclude, {
+            edgeSnap: {
+              start: startEdgeSnap,
+              end: endEdgeSnap,
+            },
+          })
         );
       } else {
         hideSnapMarker();
         draft.classList.remove("is-snapping");
-        draft.setAttribute("d", buildRopePath(pts, false, stickyIds, exclude));
+        draft.setAttribute(
+          "d",
+          buildRopePath(pts, false, stickyIds, exclude, pathOpts)
+        );
       }
     }
 
@@ -6265,10 +6454,11 @@
       if (pending || draft) discardPending(true);
     };
 
-    function stickyFromStroke(pts, excludeIds) {
+    function stickyFromStroke(pts, excludeIds, edgeStart = null, edgeEnd = null) {
       const simplified = simplify(pts, 0.9);
       let wraps = pickWrapEvents(simplified, excludeIds);
       wraps = ensureWrapsAgainstCrossing(simplified, wraps, excludeIds);
+      wraps = stripCenterAdjacentWraps(wraps, edgeStart, edgeEnd);
       const ids = [];
       for (const w of wraps) {
         const id = w.wheel && w.wheel.id;
@@ -6478,11 +6668,21 @@
 
       const exclude = pulleyCenterExcludeIdsForStroke(
         pts,
-        stickyFromStroke(simplify(pending.points, 0.5), new Set()),
+        stickyFromStroke(
+          simplify(pending.points, 0.5),
+          new Set(),
+          edgeSnap.start,
+          edgeSnap.end
+        ),
         edgeSnap.start,
         edgeSnap.end
       );
-      let stickyIds = stickyFromStroke(simplify(pending.points, 0.5), exclude);
+      let stickyIds = stickyFromStroke(
+        simplify(pending.points, 0.5),
+        exclude,
+        edgeSnap.start,
+        edgeSnap.end
+      );
 
       if (selfClose) {
         commitRope(el, pts, true, null, stickyIds);
@@ -7270,7 +7470,10 @@
     }
     rope.el.setAttribute(
       "d",
-      buildRopePath(renderPts, rope.closed, rope.wrapIds, exclude, opts)
+      buildRopePath(renderPts, rope.closed, rope.wrapIds, exclude, {
+        ...opts,
+        edgeSnap: rope.edgeSnap,
+      })
     );
   }
 
