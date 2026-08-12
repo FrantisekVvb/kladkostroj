@@ -2,7 +2,13 @@
 
 Dvě kladky na bílém pozadí — **červená pevná** a **modrá volná**.
 
-## Spuštění
+## Spuštění online
+
+**[Otevřít simulaci](https://frantisekvvb.github.io/kladkostroj/)**
+
+Po pushi na `main` se stránka nasadí automaticky přes GitHub Pages (workflow *Deploy to GitHub Pages*). První nasazení může trvat 1–2 minuty.
+
+## Spuštění lokálně
 
 ```bash
 cd kladkostroj
