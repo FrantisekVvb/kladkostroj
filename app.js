@@ -95,6 +95,11 @@
   let winchSeq = 0;
 
   const WEIGHT_SVG = `<svg width="280" height="269" viewBox="0 0 280 269" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="138" cy="50" r="45" stroke="#858585" stroke-width="10"/><path d="M267.34 269H12.3699C6.00343 269 1.2579 263.13 2.59185 256.905L43.3061 66.9047C44.2941 62.294 48.3688 59 53.0842 59H222.101C226.732 59 230.757 62.1791 231.829 66.6838L277.068 256.684C278.564 262.968 273.799 269 267.34 269Z" fill="#858585"/></svg>`;
+  const WEIGHT_LABEL_TEXT = "10 kg";
+
+  function weightInnerHtml() {
+    return `${WEIGHT_SVG}<span class="weight-label" aria-hidden="true">${WEIGHT_LABEL_TEXT}</span>`;
+  }
 
   const WINCH_SVG = `<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M49.6989 80.4041C66.6555 80.4041 80.4015 66.6581 80.4015 49.7015C80.4015 32.745 66.6555 18.999 49.6989 18.999C32.7423 18.999 18.9963 32.745 18.9963 49.7015C18.9963 66.6581 32.7423 80.4041 49.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.7016 85.4031C69.419 85.4031 85.4032 69.419 85.4032 49.7016C85.4032 29.9841 69.419 14 49.7016 14C29.9841 14 14 29.9841 14 49.7016C14 69.419 29.9841 85.4031 49.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M82.2331 49.7016C82.2331 67.665 67.6701 82.2335 49.7012 82.2335C31.7323 82.2335 17.1693 67.6705 17.1693 49.7016C17.1693 31.7327 31.7323 17.1697 49.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M22.9513 49.7234H76.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M30.7767 30.8317L68.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M68.5548 30.8317L30.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M24.8699 39.7641L74.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M59.614 24.9374L39.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.1691 25.1571L60.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M74.2219 39.2367L25.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="50" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/></svg>`;
 
@@ -467,6 +472,7 @@
       pulleySizeSlider.value = String(pct);
       pulleySizeSlider.setAttribute("aria-valuenow", String(pct));
     }
+    syncPulleyResizeHandle();
   }
 
   function findSelectedPulley() {
@@ -502,10 +508,108 @@
     return false;
   }
 
+  /** @type {HTMLElement | null} */
+  let pulleyResizeHandle = null;
+  /** @type {null | { pointerId: number, startX: number, startScale: number }} */
+  let pulleyResizeDrag = null;
+
+  function pulleyCanResize(pulley) {
+    return !!(
+      pulley &&
+      !isDocked(pulley.el) &&
+      !pulleyHasAttachedRope(pulley) &&
+      tool === "move" &&
+      !running
+    );
+  }
+
+  function ensurePulleyResizeHandle() {
+    if (pulleyResizeHandle?.isConnected) return pulleyResizeHandle;
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "pulley-resize-handle";
+    handle.hidden = true;
+    handle.setAttribute("role", "slider");
+    handle.setAttribute("aria-label", "Velikost kladky");
+    handle.setAttribute("aria-valuemin", "40");
+    handle.setAttribute("aria-valuemax", "100");
+    handle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 12H3"/><path d="m3 12 3-3"/><path d="m3 12 3 3"/><path d="M17 12h4"/><path d="m21 12-3-3"/><path d="m21 12-3 3"/></svg>`;
+    stage.appendChild(handle);
+    enablePulleyResizeHandleDrag(handle);
+    pulleyResizeHandle = handle;
+    return handle;
+  }
+
+  function syncPulleyResizeHandle() {
+    const handle = ensurePulleyResizeHandle();
+    const pulley = findSelectedPulley();
+    if (!pulley || !pulleyCanResize(pulley)) {
+      handle.hidden = true;
+      return;
+    }
+
+    const wheel = getWheelWorld(pulley.el, pulley.kind);
+    const angle = Math.PI / 4;
+    const pad = 6;
+    handle.style.left = `${wheel.cx + (wheel.r + pad) * Math.cos(angle)}px`;
+    handle.style.top = `${wheel.cy + (wheel.r + pad) * Math.sin(angle)}px`;
+    handle.hidden = false;
+    const pct = Math.round(getPulleyInstanceScale(pulley) * 100);
+    handle.setAttribute("aria-valuenow", String(pct));
+  }
+
+  function enablePulleyResizeHandleDrag(handle) {
+    handle.addEventListener("pointerdown", (e) => {
+      if (handle.hidden) return;
+      const pulley = findSelectedPulley();
+      if (!pulley || !pulleyCanResize(pulley)) return;
+      if (e.button != null && e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      beginUserAction();
+      runBlocked = false;
+      updateHistoryButtons();
+      pulleyResizeDrag = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startScale: getPulleyInstanceScale(pulley),
+      };
+      handle.classList.add("is-dragging");
+      handle.setPointerCapture(e.pointerId);
+    });
+
+    handle.addEventListener("pointermove", (e) => {
+      if (!pulleyResizeDrag || e.pointerId !== pulleyResizeDrag.pointerId) return;
+      const pulley = findSelectedPulley();
+      if (!pulley) return;
+      const dx = e.clientX - pulleyResizeDrag.startX;
+      const next = clamp(pulleyResizeDrag.startScale + dx / 220, 0.4, 1);
+      setPulleyInstanceScale(pulley, next);
+      if (pulleySizeSlider && !pulleySizeSlider.disabled) {
+        pulleySizeSlider.value = String(Math.round(next * 100));
+        pulleySizeSlider.setAttribute("aria-valuenow", String(Math.round(next * 100)));
+      }
+      syncPulleyResizeHandle();
+    });
+
+    function finish(e) {
+      if (!pulleyResizeDrag || (e && e.pointerId !== pulleyResizeDrag.pointerId)) {
+        return;
+      }
+      pulleyResizeDrag = null;
+      handle.classList.remove("is-dragging");
+      endUserAction();
+    }
+
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  }
+
   function syncPulleySelectionChrome() {
     for (const pulley of pulleys) {
       pulley.el.classList.toggle("is-selected", pulley.id === selectedPulleyId);
     }
+    syncPulleyResizeHandle();
   }
 
   function selectPulley(pulley) {
@@ -1168,6 +1272,7 @@
     syncAllWeightsToSnap();
     updateForceArrows();
     syncPulleySizeSliderState();
+    syncPulleyResizeHandle();
   }
 
   function onPulleySizeSliderInput() {
@@ -1299,8 +1404,8 @@
     }
     el.id = id;
     el.setAttribute("role", "img");
-    el.setAttribute("aria-label", "Závaží");
-    el.innerHTML = WEIGHT_SVG;
+    el.setAttribute("aria-label", "Závaží 10 kg");
+    el.innerHTML = weightInnerHtml();
     stage.appendChild(el);
     const weight = {
       el,
@@ -1470,8 +1575,8 @@
     tpl.className = "weight is-stock-template";
     tpl.id = "stock-template-weight";
     tpl.setAttribute("role", "img");
-    tpl.setAttribute("aria-label", "Závaží — vytáhnout");
-    tpl.innerHTML = WEIGHT_SVG;
+    tpl.setAttribute("aria-label", "Závaží 10 kg — vytáhnout");
+    tpl.innerHTML = weightInnerHtml();
     stockSlotWeights.appendChild(tpl);
     return tpl;
   }
@@ -4157,9 +4262,70 @@
     updateForceArrows();
   }
 
+  function simForceToNewtons(f) {
+    return (f / WEIGHT_FORCE) * WEIGHT_FORCE_N;
+  }
+
+  function ensureWinchForceLabel(winch) {
+    let label = winch.el.querySelector(".winch-force-label");
+    if (!label) {
+      label = document.createElement("div");
+      label.className = "winch-force-label";
+      label.hidden = true;
+      winch.el.appendChild(label);
+    }
+    return label;
+  }
+
+  function updateWinchForceLabels() {
+    for (const winch of winches) {
+      const label = ensureWinchForceLabel(winch);
+      if (
+        !running ||
+        isDocked(winch.el) ||
+        isStockTemplate(winch.el) ||
+        winch.snap?.type !== "rope"
+      ) {
+        label.hidden = true;
+        continue;
+      }
+
+      const rope = winch.snap.rope;
+      const state = getRopeForceState(rope);
+      if (!state) {
+        label.hidden = true;
+        continue;
+      }
+
+      const dyn = computeRopeDynamics(
+        rope,
+        state.model,
+        state.startPt,
+        state.endPt
+      );
+      const pullN = Math.min(
+        simForceToNewtons(dyn.tension),
+        WINCH_MAX_FORCE_N
+      );
+      if (pullN < 0.5) {
+        label.hidden = true;
+        continue;
+      }
+
+      label.textContent = `${Math.round(pullN)} N`;
+      label.hidden = false;
+      label.classList.toggle("is-at-max", pullN >= WINCH_MAX_FORCE_N - 0.5);
+      label.classList.toggle(
+        "is-overloaded",
+        winch.el.classList.contains("is-overload")
+      );
+    }
+  }
+
   function updateForceArrows() {
-    clearForceArrows();
     syncForceOverlay();
+    updateWinchForceLabels();
+    clearForceArrows();
     if (!showForces) return;
 
     for (const rope of ropes) {
@@ -4833,7 +4999,9 @@
 
   function ensureMoveToolForStock() {
     if (running || tool === "run") return false;
-    if (tool === "pencil" || tool === "freehand") setTool("move");
+    if (tool === "pencil" || tool === "freehand" || tool === "erase") {
+      setTool("move");
+    }
     return tool === "move";
   }
 
@@ -5000,7 +5168,7 @@
       "pointerdown",
       (e) => {
         if (running || tool === "run") return;
-        if (tool === "pencil" || tool === "freehand") {
+        if (tool === "pencil" || tool === "freehand" || tool === "erase") {
           ensureMoveToolForStock();
         }
       },
@@ -6633,6 +6801,7 @@
       rebuildAllRopes();
       syncAllWeightsToSnap();
       updateForceArrows();
+      syncPulleyResizeHandle();
     }
 
     el.addEventListener("pointerdown", (e) => {
@@ -6732,6 +6901,7 @@
       rebuildAllRopes();
       syncAllWeightsToSnap();
       updateForceArrows();
+      syncPulleyResizeHandle();
     }
 
     function nearestEdge(x, y) {
@@ -7280,6 +7450,7 @@
       "pointerdown",
       (e) => {
         if (tool !== "move" || running) return;
+        if (e.target.closest(".pulley-resize-handle")) return;
         const pulleyEl = e.target.closest(".pulley");
         if (
           pulleyEl &&
@@ -7312,7 +7483,9 @@
     if (tool !== "run") setTool("run");
   });
   if (btnErase) {
-    btnErase.addEventListener("click", () => setTool("erase"));
+    btnErase.addEventListener("click", () => {
+      setTool(tool === "erase" ? "move" : "erase");
+    });
   }
 
   if (btnUndo) btnUndo.addEventListener("click", () => undoLastStep());
@@ -7347,6 +7520,7 @@
     syncAllRopeEdgePoints();
     rebuildAllRopes();
     syncRopeEndHandles();
+    syncPulleyResizeHandle();
     syncAllWeightsToSnap();
     updateForceArrows();
   });
