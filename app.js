@@ -477,7 +477,7 @@
     if (!pulleySizeSlider) return;
     const pulley = findSelectedPulley();
     const canIndividual = pulleyCanResize(pulley);
-    const canGlobal = tool === "move" && !running;
+    const canGlobal = !running;
     pulleySizeSlider.disabled = !(canIndividual || canGlobal);
     const control = pulleySizeSlider.closest(".size-control");
     if (control) control.classList.toggle("is-disabled", pulleySizeSlider.disabled);
@@ -1346,6 +1346,7 @@
     }
     if (next !== "move") clearPulleySelection();
     updateHistoryButtons();
+    syncPulleySizeSliderState();
   }
 
   let discardFreehandPending = () => {};
@@ -7952,86 +7953,155 @@
     }
   }
 
-  function eraseTargetAtEvent(e) {
-    if (tool !== "erase" || running) return false;
-    if (e.button != null && e.button !== 0) return false;
+  /** Poloměr zásahu gumy u lana — prst na tabletu, ne šířka tahu. */
+  const ERASE_ROPE_HIT_PX = 44;
 
-    const stack =
-      typeof document.elementsFromPoint === "function"
-        ? document.elementsFromPoint(e.clientX, e.clientY)
-        : [e.target];
+  function distToRenderedRope(rope, p) {
+    const el = rope.el;
+    if (el && typeof el.getTotalLength === "function") {
+      try {
+        const len = el.getTotalLength();
+        if (len > 1) {
+          const steps = Math.max(16, Math.min(100, Math.ceil(len / 8)));
+          let best = Infinity;
+          for (let i = 0; i <= steps; i += 1) {
+            const q = el.getPointAtLength((len * i) / steps);
+            const d = Math.hypot(p.x - q.x, p.y - q.y);
+            if (d < best) best = d;
+          }
+          return best;
+        }
+      } catch (_) {
+        /* getTotalLength umí selhat u prázdné cesty */
+      }
+    }
+    const pts = rope.points;
+    if (!pts || pts.length < 2) return Infinity;
+    let best = Infinity;
+    for (let i = 1; i < pts.length; i += 1) {
+      best = Math.min(best, distPointToSegment(p, pts[i - 1], pts[i]));
+    }
+    return best;
+  }
 
-    for (const node of stack) {
-      if (!node || !node.closest) continue;
+  function findNearestRope(p, maxDist) {
+    let best = null;
+    let bestD = maxDist;
+    for (const rope of ropes) {
+      if (!rope.el?.isConnected) continue;
+      if (rope.el.classList.contains("is-draft")) continue;
+      const d = distToRenderedRope(rope, p);
+      if (d <= bestD) {
+        bestD = d;
+        best = rope;
+      }
+    }
+    return best;
+  }
 
-      const pulleyEl = node.closest(".pulley");
-      if (
-        pulleyEl &&
-        !isStockTemplate(pulleyEl) &&
-        stage.contains(pulleyEl) &&
-        findPulleyByEl(pulleyEl)
-      ) {
-        beginUserAction();
-        destroyPulley(pulleyEl);
-        endUserAction();
+  function pointHitsPulleySolid(pulley, p) {
+    if (!pulley || isDocked(pulley.el) || isStockTemplate(pulley.el)) {
+      return false;
+    }
+    const wheel = getWheelWorld(pulley.el, pulley.kind);
+    if (wheel && Math.hypot(p.x - wheel.cx, p.y - wheel.cy) <= wheel.r + 16) {
+      return true;
+    }
+    if (pulley.kind === "free" && wheel) {
+      const tip = getFreeRodEnd(pulley.el);
+      if (tip && distPointToSegment(p, { x: wheel.cx, y: wheel.cy }, tip) <= 24) {
         return true;
       }
+    }
+    return false;
+  }
 
-      const weightEl = node.closest(".weight");
-      if (
-        weightEl &&
-        !isStockTemplate(weightEl) &&
-        stage.contains(weightEl)
-      ) {
-        const weight = weights.find((w) => w.el === weightEl);
-        if (weight) {
-          beginUserAction();
+  function clientHitsElement(el, clientX, clientY, pad = 10) {
+    if (!el?.getBoundingClientRect) return false;
+    const r = el.getBoundingClientRect();
+    return (
+      clientX >= r.left - pad &&
+      clientX <= r.right + pad &&
+      clientY >= r.top - pad &&
+      clientY <= r.bottom + pad
+    );
+  }
+
+  /**
+   * Guma: předměty jen při klepnutí na viditelnou část (ne celý box kladky).
+   * Lano má široký zásah a maže se i tahem.
+   */
+  function eraseAtPointer(e, allowObjects) {
+    const p = pointerToStage(e);
+
+    if (allowObjects) {
+      for (const weight of weights) {
+        if (isDocked(weight.el) || isStockTemplate(weight.el)) continue;
+        if (clientHitsElement(weight.el, e.clientX, e.clientY, 12)) {
           destroyWeight(weight);
-          endUserAction();
           return true;
         }
       }
-
-      const winchEl = node.closest(".winch");
-      if (
-        winchEl &&
-        !isStockTemplate(winchEl) &&
-        stage.contains(winchEl)
-      ) {
-        const winch = winches.find((w) => w.el === winchEl);
-        if (winch) {
-          beginUserAction();
+      for (const winch of winches) {
+        if (isDocked(winch.el) || isStockTemplate(winch.el)) continue;
+        if (clientHitsElement(winch.el, e.clientX, e.clientY, 12)) {
           destroyWinch(winch);
-          endUserAction();
           return true;
         }
       }
-
-      const path = node.closest(".rope-path");
-      if (path && !path.classList.contains("is-draft")) {
-        const rope = ropes.find((r) => r.el === path);
-        if (rope) {
-          beginUserAction();
-          removeRope(rope);
-          endUserAction();
+      for (const pulley of pulleys) {
+        if (pointHitsPulleySolid(pulley, p)) {
+          destroyPulley(pulley.el);
           return true;
         }
       }
     }
 
+    const rope = findNearestRope(p, ERASE_ROPE_HIT_PX);
+    if (rope) {
+      removeRope(rope);
+      return true;
+    }
     return false;
   }
 
   function enableEraser() {
-    const onPointerDown = (e) => {
+    let stroke = null;
+
+    const onDown = (e) => {
       if (tool !== "erase" || running) return;
-      if (eraseTargetAtEvent(e)) {
-        e.preventDefault();
-        e.stopPropagation();
+      if (e.button != null && e.button !== 0) return;
+      if (isOverStock(e.clientX, e.clientY)) return;
+      beginUserAction();
+      stroke = { pointerId: e.pointerId, changed: false };
+      try {
+        stage.setPointerCapture(e.pointerId);
+      } catch (_) {
+        /* capture není nutný, tah i tak chytneme na window */
       }
+      if (eraseAtPointer(e, true)) stroke.changed = true;
+      e.preventDefault();
+      e.stopPropagation();
     };
-    stage.addEventListener("pointerdown", onPointerDown, true);
-    ropeLayer.addEventListener("pointerdown", onPointerDown, true);
+
+    const onMove = (e) => {
+      if (!stroke || e.pointerId !== stroke.pointerId) return;
+      if (tool !== "erase" || running) return;
+      if (eraseAtPointer(e, false)) stroke.changed = true;
+      e.preventDefault();
+    };
+
+    const onUp = (e) => {
+      if (!stroke || (e && e.pointerId !== stroke.pointerId)) return;
+      if (stroke.changed) endUserAction();
+      else cancelUserAction();
+      stroke = null;
+    };
+
+    stage.addEventListener("pointerdown", onDown, true);
+    stage.addEventListener("pointermove", onMove);
+    stage.addEventListener("pointerup", onUp);
+    stage.addEventListener("pointercancel", onUp);
   }
 
   function enablePulleySelection() {
