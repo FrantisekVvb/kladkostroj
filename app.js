@@ -3,11 +3,17 @@
   const stage = document.getElementById("stage");
   const ropeLayer = document.getElementById("rope-layer");
   const btnRope = document.getElementById("tool-rope");
+  const btnFreehand = document.getElementById("tool-freehand");
   const btnRun = document.getElementById("tool-run");
   const btnErase = document.getElementById("tool-erase");
   const btnUndo = document.getElementById("tool-undo");
   const btnReset = document.getElementById("tool-reset");
   const btnForces = document.getElementById("toggle-forces");
+  const freehandConfirm = document.getElementById("freehand-confirm");
+  const freehandConfirmOk = document.getElementById("freehand-confirm-ok");
+  const freehandConfirmCancel = document.getElementById(
+    "freehand-confirm-cancel"
+  );
   const pulleySizeSlider = document.getElementById("pulley-size-slider");
   const stockTray = document.getElementById("stock-tray");
   const stockSlotFixed = document.getElementById("stock-slot-fixed");
@@ -48,6 +54,11 @@
   const MAX_WRAP_TRAVEL = Math.PI + 0.4;
   /** Minimální obepnutí — jen proti ostrému „V“ zlomu (ne proti platným krátkým obloukům). */
   const MIN_WRAP_TRAVEL = 0.35;
+  /** Pás přimknutí lana k obvodu kladky (px za poloměrem drážky). */
+  const WRAP_ADHESION_BAND_MIN = 10;
+  const WRAP_ADHESION_BAND_RATIO = 0.32;
+  const WRAP_TOUCH_PAD = 2;
+  const WRAP_POINT_PAD = 2;
 
   /** Konec volné tyčky u modré kladky (SVG souřadnice). */
   const FREE_ROD_TIP = { x: 143.314, y: 103.887 };
@@ -383,6 +394,7 @@
 
   function undoLastStep() {
     if (!historyStack.length) return;
+    discardFreehandPending();
     if (running) {
       stopSimulation();
       if (tool === "run") {
@@ -401,6 +413,7 @@
 
   function resetToPreRun() {
     if (!preRunSnapshot) return;
+    discardFreehandPending();
     if (running) stopSimulation();
     if (tool === "run") {
       tool = "move";
@@ -472,6 +485,12 @@
         snap.type === "fixedCenter" ||
         snap.type === "freeCenter")
     );
+  }
+
+  /** Konec lana je upevněn ke středu kladky — sdílený bod pro více lan. */
+  function isRopeEndAtPulleyCenter(rope, which) {
+    ensureRopeEdgeSnap(rope);
+    return isPulleyCenterSnap(rope.edgeSnap[which]);
   }
 
   /** ID kladek, ke jejichž středu je konec lana přimknutý — ty se neobepínají. */
@@ -631,6 +650,23 @@
     return candidates[0];
   }
 
+  /** Kotva pro volný konec tužky — stejné cíle jako u nástroje Lano. */
+  function findFreehandEndpointSnapTarget(p) {
+    return findAnchorSnapTarget(p);
+  }
+
+  /**
+   * Při tažení konce upevněného k okraji: sleduj jen okraje, ne skok na střed kladky.
+   * Jinak vrátí běžný findAnchorSnapTarget.
+   */
+  function snapTargetForAttachedEnd(p, attachedSnap) {
+    if (!attachedSnap) return findAnchorSnapTarget(p);
+    if (isScreenEdgeSnap(attachedSnap)) {
+      return findEdgeSnapTarget(p);
+    }
+    return findAnchorSnapTarget(p);
+  }
+
   function normalizeEndSnap(snap) {
     if (!snap) return null;
     if (isPulleyCenterSnap(snap)) {
@@ -751,6 +787,53 @@
     for (const rope of ropes) syncRopeEdgePoints(rope);
   }
 
+  function strokeWrapsPulley(pts, pulleyId) {
+    if (!pulleyId || !pts || pts.length < 2) return false;
+    const simplified = simplify(pts, 0.9);
+    const wraps = pickWrapEvents(simplified, null);
+    return wraps.some((w) => {
+      const id = w.wheel?.id ?? w.wheelId;
+      return id === pulleyId;
+    });
+  }
+
+  /** Vyloučení obepnutí kvůli středu kladky — neplatí, pokud tah kladku obepíná. */
+  function pulleyCenterExcludeIdsForStroke(pts, ...snaps) {
+    const ids = pulleyCenterExcludeIds(...snaps);
+    if (!pts || pts.length < 2) return ids;
+    for (const snap of snaps) {
+      if (!snap) continue;
+      const normalized = normalizeEndSnap(snap);
+      if (
+        isPulleyCenterSnap(normalized) &&
+        normalized.pulleyId &&
+        strokeWrapsPulley(pts, normalized.pulleyId)
+      ) {
+        ids.delete(normalized.pulleyId);
+      }
+    }
+    return ids;
+  }
+
+  /** Bod uvnitř kladky posuň na obvod — kromě míst, kde má přimknout ke středu. */
+  function nudgeEndpointOffPulleyInterior(pts) {
+    if (!pts || pts.length < 2) return pts;
+    const result = pts.map((p) => ({ ...p }));
+    for (const idx of [0, result.length - 1]) {
+      if (findPulleyCenterSnapTarget(result[idx])) continue;
+      const neighbor = idx === 0 ? result[1] : result[result.length - 2];
+      for (const wheel of collectWheels()) {
+        const dx = result[idx].x - wheel.cx;
+        const dy = result[idx].y - wheel.cy;
+        const d = Math.hypot(dx, dy);
+        if (d >= wheel.r * 0.82) continue;
+        const ang = Math.atan2(neighbor.y - wheel.cy, neighbor.x - wheel.cx);
+        result[idx] = pointOnCircle(wheel, ang);
+      }
+    }
+    return result;
+  }
+
   function outerEdgeSnaps(a, aWhich, b, bWhich) {
     ensureRopeEdgeSnap(a);
     ensureRopeEdgeSnap(b);
@@ -772,9 +855,14 @@
     if (appRoot) appRoot.dataset.tool = next;
     stage.dataset.tool = next;
     const ropeOn = next === "pencil";
+    const freehandOn = next === "freehand";
     if (btnRope) {
       btnRope.classList.toggle("is-active", ropeOn);
       btnRope.setAttribute("aria-pressed", String(ropeOn));
+    }
+    if (btnFreehand) {
+      btnFreehand.classList.toggle("is-active", freehandOn);
+      btnFreehand.setAttribute("aria-pressed", String(freehandOn));
     }
     btnRun.classList.toggle("is-active", next === "run");
     btnRun.classList.toggle("is-run", next === "run");
@@ -787,9 +875,12 @@
     updateHistoryButtons();
   }
 
+  let discardFreehandPending = () => {};
+
   function setTool(next) {
     if (next === "run" && runBlocked) return;
     if (running && next !== "run") stopSimulation();
+    if (next !== "freehand") discardFreehandPending();
 
     tool = next;
     applyToolChrome(next);
@@ -1320,6 +1411,40 @@
     return base + side * alpha;
   }
 
+  /** Směr přiblížení / odchodu — první bod mimo pásmo obepnutí. */
+  function wheelApproachAngle(wheel, pts, fromIdx, which) {
+    const band = Math.max(WRAP_ADHESION_BAND_MIN, wheel.r * WRAP_ADHESION_BAND_RATIO);
+    const outer = wheel.r + band + 6;
+    const distTo = (p) => Math.hypot(p.x - wheel.cx, p.y - wheel.cy);
+
+    if (which === "enter") {
+      for (let i = Math.min(fromIdx, pts.length - 1); i >= 0; i -= 1) {
+        if (distTo(pts[i]) >= outer) {
+          return Math.atan2(pts[i].y - wheel.cy, pts[i].x - wheel.cx);
+        }
+      }
+      const p = pts[0];
+      return Math.atan2(p.y - wheel.cy, p.x - wheel.cx);
+    }
+
+    for (let i = Math.max(fromIdx, 0); i < pts.length; i += 1) {
+      if (distTo(pts[i]) >= outer) {
+        return Math.atan2(pts[i].y - wheel.cy, pts[i].x - wheel.cx);
+      }
+    }
+    const p = pts[pts.length - 1];
+    return Math.atan2(p.y - wheel.cy, p.x - wheel.cx);
+  }
+
+  function arcContainsAngle(enterAng, leaveAng, clockwise, ang) {
+    const total = wrapTravelRaw(enterAng, leaveAng, clockwise);
+    const to = wrapTravelRaw(enterAng, ang, clockwise);
+    if (Math.abs(total) < 1e-4) return false;
+    if (Math.sign(total) !== Math.sign(to) && Math.abs(to) > 0.05) return false;
+    if (Math.abs(to) > Math.abs(total) + 0.1) return false;
+    return true;
+  }
+
   /** SVG arc: y roste dolů → sweep=1 je po směru hodin (kladný atan2). */
   function svgArc(wheel, a0, a1, clockwise) {
     let cw = clockwise;
@@ -1356,9 +1481,8 @@
    * podle tečen a směru tahu.
    */
   function findWraps(points, wheel) {
-    // Širší pás: tah pod kladkou často klesne pod r + band a jinak
-    // by se wrap rozpadl na dvě krátká škrábnutí.
-    const band = Math.max(48, wheel.r * 1.35);
+    // Užší pás: lano se obepne jen při tahu těsně podél obvodu.
+    const band = Math.max(WRAP_ADHESION_BAND_MIN, wheel.r * WRAP_ADHESION_BAND_RATIO);
     const outer = wheel.r + band;
     const farLimit = wheel.r * 2.8;
     const distTo = (p) => Math.hypot(p.x - wheel.cx, p.y - wheel.cy);
@@ -1424,69 +1548,44 @@
   function wrapDirection(points, start, end, wheel) {
     if (end <= start) return "cw";
 
-    const a = Math.atan2(points[start].y - wheel.cy, points[start].x - wheel.cx);
-    const b = Math.atan2(points[end].y - wheel.cy, points[end].x - wheel.cx);
+    const enterHint = wheelApproachAngle(wheel, points, 0, "enter");
+    const leaveHint = wheelApproachAngle(wheel, points, points.length - 1, "leave");
+    const startPt = points[0];
+    const endPt = points[points.length - 1];
 
-    // Hledáme bod z úseku wrapping, který je nejvzdálenější od přímky
-    // procházející prvním a posledním bodem wrappingu.
-    // Tento bod spolehlivě určí, na které straně kladky lano jde — přežije
-    // i simplify, která může nechat jen 2–3 body.
-    const p0 = points[start];
-    const p1 = points[end];
-    const lineLen = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
-    const nx = -(p1.y - p0.y) / lineLen; // normála (vlevo od směru p0→p1)
-    const ny = (p1.x - p0.x) / lineLen;
-    let bestSigned = 0;
-    let bestMidAng = Math.atan2(
-      points[Math.floor((start + end) / 2)].y - wheel.cy,
-      points[Math.floor((start + end) / 2)].x - wheel.cx
-    );
-    for (let k = start; k <= end; k++) {
-      const s = (points[k].x - p0.x) * nx + (points[k].y - p0.y) * ny;
-      if (Math.abs(s) > Math.abs(bestSigned)) {
-        bestSigned = s;
-        bestMidAng = Math.atan2(points[k].y - wheel.cy, points[k].x - wheel.cx);
+    let bestCw = true;
+    let bestScore = -Infinity;
+    for (const cw of [true, false]) {
+      const e = tangentFromFreePoint(wheel, startPt, cw, true);
+      const l = tangentFromFreePoint(wheel, endPt, cw, false);
+      let score = 0;
+      const travel = Math.abs(wrapTravelRaw(e, l, cw));
+      if (travel < MIN_WRAP_TRAVEL - 1e-6 || travel > MAX_WRAP_TRAVEL + 1e-6) {
+        score -= 10000;
+      } else {
+        score -= travel * 4;
       }
-    }
-    const m = bestMidAng;
 
-    function arcContains(cw) {
-      const total = wrapTravelRaw(a, b, cw);
-      const toMid = wrapTravelRaw(a, m, cw);
-      if (Math.abs(total) < 1e-4) return false;
-      if (Math.sign(total) !== Math.sign(toMid) && Math.abs(toMid) > 0.05) {
-        return false;
-      }
-      if (Math.abs(toMid) > Math.abs(total) + 0.1) return false;
-      const fromMid = wrapTravelRaw(m, b, cw);
-      if (Math.sign(total) !== Math.sign(fromMid) && Math.abs(fromMid) > 0.05) {
-        return false;
-      }
-      return Math.abs(toMid + fromMid - total) < 0.25;
-    }
-
-    if (arcContains(true)) return "cw";
-    if (arcContains(false)) return "ccw";
-
-    // Záloha: součet úhlových kroků
-    let signed = 0;
-    for (let k = start; k < end; k += 1) {
-      const a0 = Math.atan2(points[k].y - wheel.cy, points[k].x - wheel.cx);
-      const a1 = Math.atan2(
-        points[k + 1].y - wheel.cy,
-        points[k + 1].x - wheel.cx
+      const midIdx = Math.floor((start + end) / 2);
+      const midAng = Math.atan2(
+        points[midIdx].y - wheel.cy,
+        points[midIdx].x - wheel.cx
       );
-      signed += normalizeAngle(a1 - a0);
+      if (arcContainsAngle(e, l, cw, midAng)) score += 40;
+      if (arcContainsAngle(e, l, cw, enterHint)) score += 30;
+      if (arcContainsAngle(e, l, cw, leaveHint)) score += 30;
+
+      const enterP = pointOnCircle(wheel, e);
+      const leaveP = pointOnCircle(wheel, l);
+      score += tangentAlign(wheel, e, cw, startPt, enterP) * 50;
+      score += tangentAlign(wheel, l, cw, leaveP, endPt) * 50;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestCw = cw;
+      }
     }
-    if (Math.abs(signed) < 0.12) {
-      // Střed kladky leží vlevo nebo vpravo od směrového vektoru lana?
-      // V SVG (y dolů): cross > 0 → střed je vpravo od tahu → lano se vine po obvodu cw.
-      const cross =
-        (points[end].x - points[start].x) * (wheel.cy - points[start].y) -
-        (points[end].y - points[start].y) * (wheel.cx - points[start].x);
-      signed = cross >= 0 ? 1 : -1;
-    }
-    return signed >= 0 ? "cw" : "ccw";
+    return bestCw ? "cw" : "ccw";
   }
 
   function sameWheel(a, b) {
@@ -1512,7 +1611,7 @@
   }
 
   /** Úsek jde skrz kladku nebo těsně podél obvodu (má se obepnout, ne obejít). */
-  function segmentTouchesWheel(p0, p1, wheel, pad = 5) {
+  function segmentTouchesWheel(p0, p1, wheel, pad = WRAP_TOUCH_PAD) {
     if (segmentPiercesWheel(p0, p1, wheel, 3)) return true;
     return segmentClosestDist(p0, p1, wheel) < wheel.r + pad;
   }
@@ -1569,7 +1668,7 @@
           if (range.end - range.start < 1) continue;
           let hit = false;
           for (let i = range.start; i < range.end; i += 1) {
-            if (segmentTouchesWheel(pts[i], pts[i + 1], wheel, 6)) {
+            if (segmentTouchesWheel(pts[i], pts[i + 1], wheel)) {
               hit = true;
               break;
             }
@@ -1649,7 +1748,7 @@
     let first = -1;
     let last = -1;
     for (let i = lo; i < hi; i += 1) {
-      if (segmentTouchesWheel(pts[i], pts[i + 1], wheel, 5)) {
+      if (segmentTouchesWheel(pts[i], pts[i + 1], wheel)) {
         if (first < 0) first = i;
         last = i + 1;
       }
@@ -1657,7 +1756,7 @@
     if (first < 0) {
       const distTo = (p) => Math.hypot(p.x - wheel.cx, p.y - wheel.cy);
       for (let i = lo; i <= hi; i += 1) {
-        if (distTo(pts[i]) < wheel.r + 4) {
+        if (distTo(pts[i]) < wheel.r + WRAP_POINT_PAD) {
           if (first < 0) first = i;
           last = i;
         }
@@ -1877,9 +1976,8 @@
     return best || candidates[0];
   }
 
-  function strokeHintAngle(pts, index, wheel) {
-    const p = pts[clamp(index, 0, pts.length - 1)];
-    return Math.atan2(p.y - wheel.cy, p.x - wheel.cx);
+  function strokeHintAngle(pts, index, wheel, which = "enter") {
+    return wheelApproachAngle(wheel, pts, index, which);
   }
 
   function freeSegmentMid(pts, fromIdx, toIdx) {
@@ -2163,8 +2261,8 @@
           cws[i],
           b.wheel,
           cws[i + 1],
-          strokeHintAngle(pts, a.end, a.wheel),
-          strokeHintAngle(pts, b.start, b.wheel),
+          strokeHintAngle(pts, a.end, a.wheel, "leave"),
+          strokeHintAngle(pts, b.start, b.wheel, "enter"),
           freeSegmentMid(pts, a.end, b.start),
           enterAng[i] ?? null
         );
@@ -2190,8 +2288,8 @@
             cws[n - 1],
             b.wheel,
             cws[0],
-            strokeHintAngle(pts, a.end, a.wheel),
-            strokeHintAngle(pts, b.start, b.wheel),
+            strokeHintAngle(pts, a.end, a.wheel, "leave"),
+            strokeHintAngle(pts, b.start, b.wheel, "enter"),
             freeSegmentMid(pts, a.end, pts.length - 1) ||
               freeSegmentMid(pts, 0, b.start),
             null
@@ -2203,10 +2301,10 @@
 
       for (let i = 0; i < n; i += 1) {
         if (enterAng[i] == null) {
-          enterAng[i] = strokeHintAngle(pts, wraps[i].start, wraps[i].wheel);
+          enterAng[i] = strokeHintAngle(pts, wraps[i].start, wraps[i].wheel, "enter");
         }
         if (leaveAng[i] == null) {
-          leaveAng[i] = strokeHintAngle(pts, wraps[i].end, wraps[i].wheel);
+          leaveAng[i] = strokeHintAngle(pts, wraps[i].end, wraps[i].wheel, "leave");
         }
       }
 
@@ -2316,7 +2414,7 @@
         for (const seg of anchors) {
           if (
             segmentCrossesWheel(seg.a, seg.b, wheel, 1) ||
-            segmentTouchesWheel(seg.a, seg.b, wheel, 4)
+            segmentTouchesWheel(seg.a, seg.b, wheel)
           ) {
             hit = true;
             hitFrom = seg.from;
@@ -2329,7 +2427,7 @@
           for (let i = 0; i < pts.length - 1; i += 1) {
             if (
               segmentCrossesWheel(pts[i], pts[i + 1], wheel, 1) ||
-              segmentTouchesWheel(pts[i], pts[i + 1], wheel, 4)
+              segmentTouchesWheel(pts[i], pts[i + 1], wheel)
             ) {
               hit = true;
               hitFrom = Math.max(0, i - 1);
@@ -2424,6 +2522,7 @@
     let wraps = pickWrapEvents(pts, exclude);
     wraps = ensureWrapsAgainstCrossing(pts, wraps, exclude);
     // Lepkavé kladky mají přednost — nenech wrap zmizet ve vzdálenosti
+    // (sticky již neobsahuje excluded IDs, takže merge je bezpečný)
     wraps = mergeStickyWraps(pts, wraps, sticky);
     wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
 
@@ -2552,13 +2651,19 @@
     let pts = simplify(rope.points, 0.9);
     if (pts.length < 2) pts = rope.points.slice();
 
-    const exclude = ropeCenterExcludeIds(rope);
+    const exclude = pulleyCenterExcludeIdsForStroke(
+      pts,
+      rope.edgeSnap.start,
+      rope.edgeSnap.end
+    );
     const sticky = (rope.wrapIds || rope.wrapKinds || []).filter(
       (id) => !exclude.has(id)
     );
     let wraps = pickWrapEvents(pts, exclude);
     wraps = ensureWrapsAgainstCrossing(pts, wraps, exclude);
+    // sticky je již přefiltrováno přes exclude — merge nepřidá excluded kladky
     wraps = mergeStickyWraps(pts, wraps, sticky);
+    // Dvojitá pojistka pro případ, že sticky obsahovalo excluded ID
     wraps = wraps.filter((w) => !wheelExcludedFromWrap(w.wheel, exclude));
 
     if (!wraps.length) return { wraps: [], closed: rope.closed };
@@ -2961,7 +3066,8 @@
     const maxLeft = Math.max(0, width - el.offsetWidth);
     const maxTop = Math.max(0, height - el.offsetHeight);
     el.style.left = `${clamp((parseFloat(el.style.left) || 0) + dx, 0, maxLeft)}px`;
-    el.style.top = `${clamp((parseFloat(el.style.top) || 0) + dy, 0, maxTop)}px`;
+    const nextTop = (parseFloat(el.style.top) || 0) + dy;
+    el.style.top = `${running ? Math.max(0, nextTop) : clamp(nextTop, 0, maxTop)}px`;
   }
 
   /**
@@ -3878,9 +3984,7 @@
       freePulley.vel.x = accel.pulley.x;
       freePulley.vel.y = accel.pulley.y;
       moveFreePulleyBy(freePulley, freePulley.vel.x * dt, freePulley.vel.y * dt);
-      const maxTop = Math.max(0, height - (pulleyEl?.offsetHeight || 0));
       const maxLeft = Math.max(0, width - (pulleyEl?.offsetWidth || 0));
-      if (parseFloat(pulleyEl?.style.top) >= maxTop - 0.5) freePulley.vel.y = 0;
       if (parseFloat(pulleyEl?.style.left) <= 0.5) freePulley.vel.x = 0;
       if (parseFloat(pulleyEl?.style.left) >= maxLeft - 0.5) freePulley.vel.x = 0;
     }
@@ -4746,6 +4850,8 @@
       if (excludeRope && rope === excludeRope) continue;
       if (!rope.el.isConnected) continue;
       for (const end of ropeEnds(rope)) {
+        // Konec na středu kladky neslučovat — umožní upevnit další lano ke stejnému středu.
+        if (isRopeEndAtPulleyCenter(rope, end.which)) continue;
         const d = dist(p, end.point);
         if (d <= bestDist) {
           bestDist = d;
@@ -4768,27 +4874,61 @@
     return left.concat(right);
   }
 
+  function maybeStraightenCenterAnchoredRope(rope) {
+    if (!rope || rope.closed) return;
+    ensureRopeEdgeSnap(rope);
+    const startSnap = rope.edgeSnap.start;
+    const endSnap = rope.edgeSnap.end;
+    if (!isPulleyCenterSnap(startSnap) || !isPulleyCenterSnap(endSnap)) return;
+
+    const exclude = pulleyCenterExcludeIdsForStroke(
+      rope.points,
+      rope.edgeSnap.start,
+      rope.edgeSnap.end
+    );
+    const draft = {
+      points: rope.points,
+      closed: false,
+      edgeSnap: rope.edgeSnap,
+      wrapIds: (rope.wrapIds || []).filter((id) => !exclude.has(id)),
+    };
+    const model = computeRopeModel(draft);
+    if (model.wraps.length > 0) return;
+
+    const startPt = getRopeEndPoint(rope, "start");
+    const endPt = getRopeEndPoint(rope, "end");
+    rope.points = [startPt, endPt];
+    rope.wrapIds = [];
+  }
+
   function commitRope(el, points, closed, edgeSnap, stickyIds) {
-    const d = buildRopePath(points, closed, stickyIds || null);
+    const nextEdge = edgeSnap || { start: null, end: null };
+    const exclude = pulleyCenterExcludeIdsForStroke(
+      points,
+      nextEdge.start,
+      nextEdge.end
+    );
+    const filteredSticky = (stickyIds || []).filter((id) => !exclude.has(id));
+    const d = buildRopePath(points, closed, filteredSticky, exclude);
     el.classList.remove("is-draft", "is-snapping");
     el.setAttribute("d", d);
     if (closed) el.dataset.closed = "true";
     else delete el.dataset.closed;
 
     const existing = ropes.find((r) => r.el === el);
-    const nextEdge = edgeSnap || { start: null, end: null };
     const draft = {
       el,
       points,
       closed,
       edgeSnap: nextEdge,
-      wrapIds: stickyIds ? stickyIds.slice() : [],
+      wrapIds: filteredSticky.slice(),
     };
     const model = computeRopeModel(draft);
-    const wrapIds =
-      stickyIds && stickyIds.length
-        ? stickyIds.slice()
-        : model.wraps.map((w) => w.wheelId).filter(Boolean);
+    const wrapIds = (
+      filteredSticky.length
+        ? filteredSticky.slice()
+        : model.wraps.map((w) => w.wheelId).filter(Boolean)
+    ).filter((id) => !exclude.has(id));
 
     if (existing) {
       existing.points = points;
@@ -4796,14 +4936,36 @@
       existing.wrapIds = wrapIds;
       if (edgeSnap) existing.edgeSnap = nextEdge;
       else ensureRopeEdgeSnap(existing);
+      maybeStraightenCenterAnchoredRope(existing);
     } else {
-      ropes.push({
+      const rope = {
         el,
         points,
         closed,
         edgeSnap: nextEdge,
         wrapIds,
-      });
+      };
+      ropes.push(rope);
+      maybeStraightenCenterAnchoredRope(rope);
+    }
+    const rope = ropes.find((r) => r.el === el);
+    if (rope) {
+      const excludeAfter = pulleyCenterExcludeIdsForStroke(
+        rope.points,
+        rope.edgeSnap.start,
+        rope.edgeSnap.end
+      );
+      const renderPts = rope.points.slice();
+      if (!rope.closed) {
+        renderPts[0] = { ...getRopeEndPoint(rope, "start") };
+        renderPts[renderPts.length - 1] = {
+          ...getRopeEndPoint(rope, "end"),
+        };
+      }
+      rope.el.setAttribute(
+        "d",
+        buildRopePath(renderPts, rope.closed, rope.wrapIds, excludeAfter)
+      );
     }
     syncRopeCount();
     syncRopeEndHandles();
@@ -4836,17 +4998,26 @@
 
   function syncRopeEndHandles() {
     clearEndHandles();
-    if (tool !== "move") return;
+    if (tool !== "move" && tool !== "pencil" && tool !== "freehand") return;
 
     for (const rope of ropes) {
       if (!rope.el.isConnected || rope.closed) continue;
       for (const end of ropeEnds(rope)) {
-        if (isRopeEndAttached(rope, end.which)) continue;
+        if (tool === "move" && isRopeEndTaken(rope, end.which, null, null)) continue;
+        if (
+          (tool === "pencil" || tool === "freehand") &&
+          isRopeEndAtPulleyCenter(rope, end.which)
+        ) {
+          continue;
+        }
         const handle = document.createElementNS(
           "http://www.w3.org/2000/svg",
           "circle"
         );
         handle.classList.add("rope-end-handle");
+        if (tool === "pencil" || tool === "freehand") {
+          handle.classList.add("is-pencil-hint");
+        }
         handle.setAttribute("r", String(END_GRAB_RADIUS));
         handle.setAttribute("cx", end.point.x.toFixed(2));
         handle.setAttribute("cy", end.point.y.toFixed(2));
@@ -4855,6 +5026,9 @@
           "aria-label",
           end.which === "start" ? "Začátek lana" : "Konec lana"
         );
+        if (tool === "pencil" || tool === "freehand") {
+          handle.setAttribute("aria-hidden", "true");
+        }
         ropeLayer.appendChild(handle);
         endHandles.push({ el: handle, rope, which: end.which });
       }
@@ -4925,11 +5099,12 @@
     rope.edgeSnap[which] = normalizeEndSnap(snap);
     if (isPulleyCenterSnap(rope.edgeSnap[which]) && rope.edgeSnap[which].pulleyId) {
       const pid = rope.edgeSnap[which].pulleyId;
-      if (rope.wrapIds) {
+      if (rope.wrapIds && !strokeWrapsPulley(rope.points, pid)) {
         rope.wrapIds = rope.wrapIds.filter((id) => id !== pid);
       }
     }
     syncRopeEdgePoint(rope, which);
+    maybeStraightenCenterAnchoredRope(rope);
     rebuildRope(rope);
     syncRopeEndHandles();
     syncAllWeightsToSnap();
@@ -5001,7 +5176,7 @@
       const attached = dragging.rope.edgeSnap[dragging.which];
 
       if (attached) {
-        const anchorSnap = findAnchorSnapTarget(p);
+        const anchorSnap = snapTargetForAttachedEnd(p, attached);
         if (anchorSnap) {
           attachRopeEndToTarget(
             dragging.rope,
@@ -5036,8 +5211,12 @@
     function finish(e) {
       if (!dragging || (e && e.pointerId !== dragging.pointerId)) return;
       const p = stagePoint(e);
+      ensureRopeEdgeSnap(dragging.rope);
+      const wasAttached = dragging.rope.edgeSnap[dragging.which];
       const ropeSnap = findSnapTarget(p, dragging.rope);
-      const anchorSnap = ropeSnap ? null : findAnchorSnapTarget(p);
+      const anchorSnap = ropeSnap
+        ? null
+        : snapTargetForAttachedEnd(p, wasAttached);
 
       dragging.el.classList.remove("is-dragging", "is-snapping");
       hideSnapMarker();
@@ -5060,6 +5239,7 @@
         updateRopeEndPoint(dragging.rope, dragging.which, p);
       }
 
+      syncRopeEndHandles();
       dragging = null;
       endUserAction();
     }
@@ -5094,8 +5274,9 @@
       return concatPoints(attachFrom.rope, attachFrom.which, points);
     }
 
-    function draftExcludeIds(endAnchorSnap) {
-      return pulleyCenterExcludeIds(
+    function draftExcludeIds(pts, endAnchorSnap) {
+      return pulleyCenterExcludeIdsForStroke(
+        pts,
         startEdgeSnap,
         endAnchorSnap,
         attachFrom?.rope?.edgeSnap?.start,
@@ -5129,7 +5310,7 @@
         dist(pts[pts.length - 1], pts[0]) <= CLOSE_SNAP_RADIUS;
       const endEdgeSnap =
         endSnap || selfClose ? null : findAnchorSnapTarget(pts[pts.length - 1]);
-      const exclude = draftExcludeIds(endEdgeSnap);
+      const exclude = draftExcludeIds(pts, endEdgeSnap);
       rememberStickyFromPoints(pts, exclude);
 
       if (selfClose) {
@@ -5226,11 +5407,14 @@
       }
     });
 
-    function stickyForEdgeSnap(edgeSnapObj, ids) {
-      const exclude = pulleyCenterExcludeIds(
-        edgeSnapObj?.start,
-        edgeSnapObj?.end
-      );
+    function stickyForEdgeSnap(edgeSnapObj, ids, strokePts) {
+      const exclude = strokePts
+        ? pulleyCenterExcludeIdsForStroke(
+            strokePts,
+            edgeSnapObj?.start,
+            edgeSnapObj?.end
+          )
+        : pulleyCenterExcludeIds(edgeSnapObj?.start, edgeSnapObj?.end);
       return (ids || []).filter((id) => !exclude.has(id));
     }
 
@@ -5258,6 +5442,7 @@
       }
 
       let pts = effectivePoints();
+      pts = nudgeEndpointOffPulleyInterior(pts);
       let closed = false;
       let edgeSnap = { start: null, end: null };
       let endWeightSnap = null;
@@ -5275,7 +5460,7 @@
         pts[pts.length - 1],
         attachFrom && attachFrom.rope
       );
-      const endEdgeSnap = endSnap || selfClose
+      let endEdgeSnap = endSnap || selfClose
         ? null
         : findAnchorSnapTarget(pts[pts.length - 1]);
 
@@ -5294,9 +5479,9 @@
         }
       }
 
-      const exclude = draftExcludeIds(endEdgeSnap);
+      const exclude = draftExcludeIds(pts, endEdgeSnap);
       rememberStickyFromPoints(pts, exclude);
-      stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds);
+      stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds, pts);
 
       if (selfClose) {
         pts[pts.length - 1] = { x: pts[0].x, y: pts[0].y };
@@ -5341,7 +5526,7 @@
                 : otherEdgeSnap.end,
           };
         }
-        stickyIds = stickyForEdgeSnap(mergedEdge, stickyIds);
+        stickyIds = stickyForEdgeSnap(mergedEdge, stickyIds, pts);
         removeRope(endSnap.rope);
         if (attachFrom) removeRope(attachFrom.rope);
         commitRope(draft, pts, false, mergedEdge, stickyIds);
@@ -5364,11 +5549,11 @@
               ? normalizeEndSnap(endEdgeSnap)
               : attachFrom.rope.edgeSnap.end;
         }
-        stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds);
+        stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds, pts);
         removeRope(attachFrom.rope);
         commitRope(draft, pts, false, edgeSnap, stickyIds);
       } else {
-        stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds);
+        stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds, pts);
         commitRope(draft, pts, false, edgeSnap, stickyIds);
       }
 
@@ -5393,6 +5578,342 @@
 
     ropeLayer.addEventListener("pointerup", finish);
     ropeLayer.addEventListener("pointercancel", finish);
+  }
+
+  function enableFreehand() {
+    let drawing = false;
+    let pointerId = null;
+    let draft = null;
+    let points = [];
+    /** @type {null | { rope: typeof ropes[0], which: "start"|"end", point: {x:number,y:number} }} */
+    let attachFrom = null;
+    /** @type {null | { el: SVGPathElement, points: {x:number,y:number}[], attachFrom: typeof attachFrom }} */
+    let pending = null;
+
+    function stagePoint(e) {
+      const { rect } = stageSize();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    function setConfirmVisible(show) {
+      if (!freehandConfirm) return;
+      freehandConfirm.hidden = !show;
+    }
+
+    function restoreAttachFromOpacity() {
+      if (attachFrom?.rope?.el) attachFrom.rope.el.style.opacity = "";
+    }
+
+    function clearDraftState() {
+      drawing = false;
+      pointerId = null;
+      draft = null;
+      points = [];
+      restoreAttachFromOpacity();
+      attachFrom = null;
+    }
+
+    function discardPending(cancelAction) {
+      if (pending?.attachFrom?.rope?.el) pending.attachFrom.rope.el.style.opacity = "";
+      if (pending?.el?.isConnected) pending.el.remove();
+      pending = null;
+      setConfirmVisible(false);
+      if (draft?.isConnected) draft.remove();
+      clearDraftState();
+      if (cancelAction) cancelUserAction();
+    }
+
+    discardFreehandPending = () => {
+      if (pending || draft) discardPending(true);
+    };
+
+    function stickyFromStroke(pts, excludeIds) {
+      const simplified = simplify(pts, 0.9);
+      let wraps = pickWrapEvents(simplified, excludeIds);
+      wraps = ensureWrapsAgainstCrossing(simplified, wraps, excludeIds);
+      const ids = [];
+      for (const w of wraps) {
+        const id = w.wheel && w.wheel.id;
+        if (id && !excludeIds?.has(id) && !ids.includes(id)) ids.push(id);
+      }
+      return ids.filter((id) => !excludeIds?.has(id));
+    }
+
+    function updateDraftRaw() {
+      if (!draft) return;
+      draft.setAttribute("d", pointsToPolyline(points));
+    }
+
+    function confirmPending() {
+      if (!pending) return;
+      const el = pending.el;
+      let pts = simplify(pending.points, 0.7);
+      pts = nudgeEndpointOffPulleyInterior(pts);
+      if (pts.length < 2) {
+        discardPending(true);
+        return;
+      }
+
+      const selfClose =
+        pts.length >= 4 && dist(pts[pts.length - 1], pts[0]) <= CLOSE_SNAP_RADIUS;
+
+      let edgeSnap = { start: null, end: null };
+      let startWeightSnap = null;
+      let endWeightSnap = null;
+      let startWinchSnap = null;
+      let endWinchSnap = null;
+      let mergeStart = null;
+      let mergeEnd = null;
+
+      if (!selfClose) {
+        mergeStart = pending.attachFrom || findSnapTarget(pts[0], null);
+        mergeEnd = findSnapTarget(pts[pts.length - 1], null);
+        if (mergeStart && mergeEnd && mergeStart.rope === mergeEnd.rope) {
+          mergeEnd = null;
+        }
+
+        if (!mergeStart) {
+          const startAnchor = findFreehandEndpointSnapTarget(pts[0]);
+          if (startAnchor) {
+            if (startAnchor.type === "weight") {
+              startWeightSnap = startAnchor.weight;
+              pts[0] = { x: startAnchor.point.x, y: startAnchor.point.y };
+            } else if (startAnchor.type === "winch") {
+              startWinchSnap = startAnchor.winch;
+              pts[0] = { x: startAnchor.point.x, y: startAnchor.point.y };
+            } else {
+              edgeSnap.start = normalizeEndSnap(startAnchor);
+              pts[0] = { x: startAnchor.point.x, y: startAnchor.point.y };
+            }
+          }
+        } else {
+          pts[0] = { x: mergeStart.point.x, y: mergeStart.point.y };
+        }
+
+        if (!mergeEnd) {
+          const endAnchor = findFreehandEndpointSnapTarget(pts[pts.length - 1]);
+          if (endAnchor) {
+            if (endAnchor.type === "weight") {
+              endWeightSnap = endAnchor.weight;
+              pts[pts.length - 1] = {
+                x: endAnchor.point.x,
+                y: endAnchor.point.y,
+              };
+            } else if (endAnchor.type === "winch") {
+              endWinchSnap = endAnchor.winch;
+              pts[pts.length - 1] = {
+                x: endAnchor.point.x,
+                y: endAnchor.point.y,
+              };
+            } else {
+              edgeSnap.end = normalizeEndSnap(endAnchor);
+              pts[pts.length - 1] = {
+                x: endAnchor.point.x,
+                y: endAnchor.point.y,
+              };
+            }
+          }
+        } else {
+          pts[pts.length - 1] = { x: mergeEnd.point.x, y: mergeEnd.point.y };
+        }
+      } else {
+        pts[pts.length - 1] = { x: pts[0].x, y: pts[0].y };
+      }
+
+      const exclude = pulleyCenterExcludeIdsForStroke(
+        pts,
+        edgeSnap.start,
+        edgeSnap.end
+      );
+      let stickyIds = stickyFromStroke(simplify(pending.points, 0.5), exclude);
+
+      if (selfClose) {
+        commitRope(el, pts, true, null, stickyIds);
+      } else if (mergeStart && mergeEnd) {
+        ensureRopeEdgeSnap(mergeStart.rope);
+        ensureRopeEdgeSnap(mergeEnd.rope);
+        for (const src of [mergeStart.rope, mergeEnd.rope]) {
+          if (!src.wrapIds) continue;
+          for (const id of src.wrapIds) {
+            if (!stickyIds.includes(id)) stickyIds.push(id);
+          }
+        }
+        let mergedPts = concatPoints(
+          { points: mergeStart.rope.points, closed: false },
+          mergeStart.which,
+          pts
+        );
+        mergedPts = concatPoints(
+          { points: mergedPts, closed: false },
+          "end",
+          mergeEnd.which === "end"
+            ? mergeEnd.rope.points.slice().reverse()
+            : mergeEnd.rope.points.slice()
+        );
+        const mergedEdge = outerEdgeSnaps(
+          mergeStart.rope,
+          mergeStart.which,
+          mergeEnd.rope,
+          mergeEnd.which
+        );
+        stickyIds = stickyIds.filter(
+          (id) =>
+            !pulleyCenterExcludeIdsForStroke(
+              mergedPts,
+              mergedEdge.start,
+              mergedEdge.end
+            ).has(id)
+        );
+        removeRope(mergeEnd.rope);
+        removeRope(mergeStart.rope);
+        commitRope(el, mergedPts, false, mergedEdge, stickyIds);
+      } else if (mergeStart) {
+        ensureRopeEdgeSnap(mergeStart.rope);
+        if (mergeStart.rope.wrapIds) {
+          for (const id of mergeStart.rope.wrapIds) {
+            if (!stickyIds.includes(id) && !exclude.has(id)) stickyIds.push(id);
+          }
+        }
+        const mergedPts = concatPoints(
+          { points: mergeStart.rope.points, closed: false },
+          mergeStart.which,
+          pts
+        );
+        const mergedEdge = {
+          start:
+            mergeStart.which === "end"
+              ? mergeStart.rope.edgeSnap.start
+              : mergeStart.rope.edgeSnap.end,
+          end: edgeSnap.end,
+        };
+        stickyIds = stickyIds.filter(
+          (id) =>
+            !pulleyCenterExcludeIdsForStroke(
+              mergedPts,
+              mergedEdge.start,
+              mergedEdge.end
+            ).has(id)
+        );
+        removeRope(mergeStart.rope);
+        commitRope(el, mergedPts, false, mergedEdge, stickyIds);
+      } else if (mergeEnd) {
+        ensureRopeEdgeSnap(mergeEnd.rope);
+        if (mergeEnd.rope.wrapIds) {
+          for (const id of mergeEnd.rope.wrapIds) {
+            if (!stickyIds.includes(id) && !exclude.has(id)) stickyIds.push(id);
+          }
+        }
+        const mergedPts = concatPoints(
+          { points: pts, closed: false },
+          "end",
+          mergeEnd.which === "end"
+            ? mergeEnd.rope.points.slice().reverse()
+            : mergeEnd.rope.points.slice()
+        );
+        const mergedEdge = {
+          start: edgeSnap.start,
+          end:
+            mergeEnd.which === "start"
+              ? mergeEnd.rope.edgeSnap.end
+              : mergeEnd.rope.edgeSnap.start,
+        };
+        stickyIds = stickyIds.filter(
+          (id) =>
+            !pulleyCenterExcludeIdsForStroke(
+              mergedPts,
+              mergedEdge.start,
+              mergedEdge.end
+            ).has(id)
+        );
+        removeRope(mergeEnd.rope);
+        commitRope(el, mergedPts, false, mergedEdge, stickyIds);
+      } else {
+        stickyIds = stickyIds.filter((id) => !exclude.has(id));
+        commitRope(el, pts, false, edgeSnap, stickyIds);
+      }
+
+      const rope = ropes.find((r) => r.el === el);
+      if (rope) {
+        if (startWeightSnap) attachRopeEndToWeight(rope, "start", startWeightSnap);
+        if (endWeightSnap) attachRopeEndToWeight(rope, "end", endWeightSnap);
+        if (startWinchSnap) attachRopeEndToWinch(rope, "start", startWinchSnap);
+        if (endWinchSnap) attachRopeEndToWinch(rope, "end", endWinchSnap);
+      }
+
+      pending = null;
+      setConfirmVisible(false);
+      clearDraftState();
+      endUserAction();
+    }
+
+    ropeLayer.addEventListener("pointerdown", (e) => {
+      if (tool !== "freehand" || running) return;
+      if (e.button != null && e.button !== 0) return;
+      if (pending) return;
+
+      beginUserAction();
+      syncRopeViewBox();
+      const p = stagePoint(e);
+      attachFrom = findSnapTarget(p, null);
+      if (attachFrom) {
+        points = [{ x: attachFrom.point.x, y: attachFrom.point.y }];
+        attachFrom.rope.el.style.opacity = "0.25";
+      } else {
+        points = [p];
+      }
+      drawing = true;
+      pointerId = e.pointerId;
+      draft = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      draft.classList.add("rope-path", "is-freehand-draft");
+      draft.setAttribute("d", pointsToPolyline(points));
+      ropeLayer.appendChild(draft);
+      ropeLayer.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+
+    ropeLayer.addEventListener("pointermove", (e) => {
+      if (!drawing || e.pointerId !== pointerId) return;
+      const p = stagePoint(e);
+      const last = points[points.length - 1];
+      if (!last || dist(last, p) >= 1.5) {
+        points.push(p);
+        updateDraftRaw();
+      }
+    });
+
+    function finishStroke(e) {
+      if (!drawing || (e && e.pointerId !== pointerId)) return;
+      drawing = false;
+      pointerId = null;
+
+      if (!draft || points.length < 2) {
+        if (draft) draft.remove();
+        clearDraftState();
+        cancelUserAction();
+        return;
+      }
+
+      draft.classList.remove("is-freehand-draft");
+      draft.classList.add("is-freehand-pending");
+      pending = { el: draft, points: points.slice(), attachFrom };
+      restoreAttachFromOpacity();
+      attachFrom = null;
+      draft = null;
+      points = [];
+      setConfirmVisible(true);
+    }
+
+    ropeLayer.addEventListener("pointerup", finishStroke);
+    ropeLayer.addEventListener("pointercancel", finishStroke);
+
+    if (freehandConfirmOk) {
+      freehandConfirmOk.addEventListener("click", () => confirmPending());
+    }
+    if (freehandConfirmCancel) {
+      freehandConfirmCancel.addEventListener("click", () => {
+        discardPending(true);
+      });
+    }
   }
 
   function enableFreeDrag(el) {
@@ -5732,6 +6253,95 @@
     return false;
   }
 
+  function freePulleyIsOnRope(pulley) {
+    for (const rope of ropes) {
+      if (!rope.el.isConnected || rope.closed) continue;
+      const model = rope.sim?.model || computeRopeModel(rope);
+      if (getRopeFreePulley(rope, model) === pulley) return true;
+      ensureRopeEdgeSnap(rope);
+      for (const which of ["start", "end"]) {
+        const snap = rope.edgeSnap[which];
+        if (isPulleyCenterSnap(snap) && snap.pulleyId === pulley.id) return true;
+      }
+    }
+    return false;
+  }
+
+  function ropeSegmentPoints(rope) {
+    const pts = rope.points.slice();
+    if (!pts.length) return pts;
+    if (running && rope.sim && !rope.closed) {
+      pts[0] = { ...rope.sim.startPt };
+      pts[pts.length - 1] = { ...rope.sim.endPt };
+    } else {
+      pts[0] = { ...getRopeEndPoint(rope, "start") };
+      pts[pts.length - 1] = { ...getRopeEndPoint(rope, "end") };
+    }
+    return pts;
+  }
+
+  function distPointToSegment(p, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-8) return dist(p, a);
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+    t = clamp(t, 0, 1);
+    return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
+  }
+
+  function segmentSupportsWheel(a, b, wheel, tol) {
+    const bottomY = wheel.cy + wheel.r * 0.92;
+    const left = wheel.cx - wheel.r * 1.05;
+    const right = wheel.cx + wheel.r * 1.05;
+    const contact = { x: wheel.cx, y: bottomY };
+    if (distPointToSegment(contact, a, b) <= tol) {
+      const steps = 8;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const x = a.x + (b.x - a.x) * t;
+        const y = a.y + (b.y - a.y) * t;
+        if (x >= left && x <= right && y >= bottomY - tol && y <= bottomY + tol * 2) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function freePulleyHasRopeSupport(pulley) {
+    const wheel = getWheelWorld(pulley.el, "free");
+    const tol = Math.max(14, wheel.r * 0.4);
+    for (const rope of ropes) {
+      if (!rope.el.isConnected) continue;
+      const pts = ropeSegmentPoints(rope);
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        if (segmentSupportsWheel(pts[i], pts[i + 1], wheel, tol)) return true;
+      }
+    }
+    return false;
+  }
+
+  function simulateFreePulleys(dt) {
+    for (const pulley of pulleys) {
+      if (pulley.kind !== "free" || isDocked(pulley.el)) continue;
+      if (freePulleyIsOnRope(pulley)) continue;
+      if (freePulleyHasRopeSupport(pulley)) continue;
+
+      pulley.vel.x = 0;
+      pulley.vel.y = GRAVITY;
+      moveFreePulleyBy(pulley, 0, GRAVITY * dt);
+
+      const rodW = weights.find(
+        (w) => w.snap.type === "rod" && w.snap.pulley === pulley.el
+      );
+      if (rodW) {
+        const rod = getFreeRodEnd(pulley.el);
+        if (rod) placeWeightAtHook(rodW, rod);
+      }
+    }
+  }
+
   function moveFreePulleyBy(pulley, dx, dy) {
     const el = pulley?.el;
     if (!el || isDocked(el)) return;
@@ -5740,7 +6350,8 @@
     const maxLeft = Math.max(0, width - el.offsetWidth);
     const maxTop = Math.max(0, height - el.offsetHeight);
     const left = clamp(parseFloat(el.style.left) + dx, 0, maxLeft);
-    const top = clamp(parseFloat(el.style.top) + dy, 0, maxTop);
+    const nextTop = parseFloat(el.style.top) + dy;
+    const top = running ? Math.max(0, nextTop) : clamp(nextTop, 0, maxTop);
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
     rebuildAllRopes();
@@ -5748,6 +6359,11 @@
 
   function rebuildRope(rope) {
     syncRopeEdgePoints(rope);
+    const exclude = pulleyCenterExcludeIdsForStroke(
+      rope.points,
+      rope.edgeSnap.start,
+      rope.edgeSnap.end
+    );
     if (running && rope.sim) {
       rope.el.setAttribute(
         "d",
@@ -5769,12 +6385,24 @@
           model.wraps[i].leaveAng = live.leaveAng[i];
         }
       }
-      rope.wrapIds = model.wraps.map((w) => w.wheelId).filter(Boolean);
+      rope.wrapIds = model.wraps
+        .map((w) => w.wheelId)
+        .filter(Boolean)
+        .filter((id) => !exclude.has(id));
       rope.el.setAttribute("d", buildRopeFromModel(model, startPt, endPt));
       return;
     }
 
-    rope.el.setAttribute("d", buildRopePath(rope.points, rope.closed));
+    rope.wrapIds = (rope.wrapIds || []).filter((id) => !exclude.has(id));
+    const renderPts = rope.points.slice();
+    if (!rope.closed) {
+      renderPts[0] = { ...startPt };
+      renderPts[renderPts.length - 1] = { ...endPt };
+    }
+    rope.el.setAttribute(
+      "d",
+      buildRopePath(renderPts, rope.closed, rope.wrapIds, exclude)
+    );
   }
 
   function rebuildAllRopes() {
@@ -5785,9 +6413,8 @@
   }
 
   function physicsStep(dt) {
-    if (!weights.length) return;
-
     simulateRopes(dt);
+    simulateFreePulleys(dt);
 
     for (const weight of weights) {
       if (isDocked(weight.el)) continue;
@@ -5955,6 +6582,12 @@
       else setTool("pencil");
     });
   }
+  if (btnFreehand) {
+    btnFreehand.addEventListener("click", () => {
+      if (tool === "freehand") setTool("move");
+      else setTool("freehand");
+    });
+  }
   btnRun.addEventListener("click", () => {
     if (tool === "run") setTool("move");
     else setTool("run");
@@ -5977,6 +6610,7 @@
   }
 
   enablePencil();
+  enableFreehand();
   enableRopeEndDrag();
   enableStockSpawning();
   enableEraser();
