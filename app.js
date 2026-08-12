@@ -707,53 +707,56 @@
     return { width: rect.width, height: rect.height, rect };
   }
 
-  function parseTransformOriginPx(el) {
-    const style = getComputedStyle(el);
-    const parts = style.transformOrigin.split(/\s+/);
-    const w = el.clientWidth;
-    const h = el.clientHeight;
-    const toPx = (part, size) => {
-      if (!part) return 0;
-      if (part.endsWith("%")) return (parseFloat(part) / 100) * size;
-      return parseFloat(part) || 0;
-    };
-    return {
-      x: toPx(parts[0], w),
-      y: toPx(parts[1] ?? parts[0], h),
-    };
+  /** @type {WeakMap<SVGSVGElement, SVGCircleElement>} */
+  const svgCoordProbeCache = new WeakMap();
+
+  function ensureSvgCoordProbe(svg) {
+    let probe = svgCoordProbeCache.get(svg);
+    if (probe?.isConnected) return probe;
+    probe = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    probe.setAttribute("data-wheel-probe", "1");
+    probe.setAttribute("r", "1");
+    probe.setAttribute("fill", "#000");
+    probe.setAttribute("opacity", "0");
+    probe.setAttribute("pointer-events", "none");
+    svg.appendChild(probe);
+    svgCoordProbeCache.set(svg, probe);
+    return probe;
   }
 
-  function applyCssTransformToPoint(x, y, el) {
-    const style = getComputedStyle(el);
-    const t = style.transform;
-    if (!t || t === "none") return { x, y };
-    const m = new DOMMatrix(t);
-    const o = parseTransformOriginPx(el);
-    const dx = x - o.x;
-    const dy = y - o.y;
-    const p = new DOMPoint(dx, dy).matrixTransform(m);
-    return { x: p.x + o.x, y: p.y + o.y };
-  }
-
-  /** SVG user coords → offset od left/top hostitele (kladky), včetně CSS transform. */
-  function svgUserToElLocal(svg, ux, uy) {
-    const vb = svg.viewBox.baseVal;
-    const vbW =
-      vb.width || parseFloat(svg.getAttribute("width")) || svg.clientWidth || 1;
-    const vbH =
-      vb.height ||
-      parseFloat(svg.getAttribute("height")) ||
-      svg.clientHeight ||
-      1;
-    const svgW = svg.clientWidth || svg.getBoundingClientRect().width || vbW;
-    const svgH = svg.clientHeight || svg.getBoundingClientRect().height || vbH;
-    let x = ((ux - vb.x) / vbW) * svgW + svg.offsetLeft;
-    let y = ((uy - vb.y) / vbH) * svgH + svg.offsetTop;
-    const host = svg.parentElement;
-    if (host && host !== stage) {
-      ({ x, y } = applyCssTransformToPoint(x, y, host));
+  /** SVG user → client (viewport) souřadnice; zahrnuje CSS transform rodičů. */
+  function svgUserToClient(svg, ux, uy) {
+    if (!svg) return null;
+    const probe = ensureSvgCoordProbe(svg);
+    probe.setAttribute("cx", String(ux));
+    probe.setAttribute("cy", String(uy));
+    const rect = probe.getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) {
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
     }
-    return { x, y };
+    if (rect.left || rect.top) {
+      return { x: rect.left, y: rect.top };
+    }
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = ux;
+    pt.y = uy;
+    const screen = pt.matrixTransform(ctm);
+    return { x: screen.x, y: screen.y };
+  }
+
+  function svgUserToStage(svg, ux, uy) {
+    const client = svgUserToClient(svg, ux, uy);
+    if (!client) return null;
+    const stageRect = stage.getBoundingClientRect();
+    return {
+      x: client.x - stageRect.left,
+      y: client.y - stageRect.top,
+    };
   }
 
   /** Bod ukazatele ve stage souřadnicích — přes inverse CTM vrstvy lana. */
@@ -1854,15 +1857,34 @@
       return { cx: 0, cy: 0, r: 0 };
     }
 
-    const center = svgUserToElLocal(svg, meta.cx, meta.cy);
-    const rim = svgUserToElLocal(svg, meta.cx + meta.grooveR, meta.cy);
+    const center = svgUserToStage(svg, meta.cx, meta.cy);
+    const rim = svgUserToStage(svg, meta.cx + meta.grooveR, meta.cy);
+    if (center && rim) {
+      return {
+        cx: center.x,
+        cy: center.y,
+        r: Math.hypot(rim.x - center.x, rim.y - center.y),
+      };
+    }
+
+    const scale =
+      (svg.getBoundingClientRect().width || el.offsetWidth) / meta.vbW;
     const left = parseFloat(el.style.left) || 0;
     const top = parseFloat(el.style.top) || 0;
     return {
-      cx: left + center.x,
-      cy: top + center.y,
-      r: Math.hypot(rim.x - center.x, rim.y - center.y),
+      cx: left + meta.cx * scale,
+      cy: top + meta.cy * scale,
+      r: meta.grooveR * scale,
     };
+  }
+
+  /** Posune volnou kladku tak, aby střed kola ležel v bodě stage (cx, cy). */
+  function moveFreePulleyWheelTo(el, cx, cy) {
+    const wheel = getWheelWorld(el, "free");
+    const left = parseFloat(el.style.left) || 0;
+    const top = parseFloat(el.style.top) || 0;
+    el.style.left = `${left + (cx - wheel.cx)}px`;
+    el.style.top = `${top + (cy - wheel.cy)}px`;
   }
 
   function collectWheels() {
@@ -4801,11 +4823,7 @@
   }
 
   function svgPointToStage(svg, x, y) {
-    const host = svg?.parentElement;
-    const local = svgUserToElLocal(svg, x, y);
-    const left = parseFloat(host?.style.left) || 0;
-    const top = parseFloat(host?.style.top) || 0;
-    return { x: left + local.x, y: top + local.y };
+    return svgUserToStage(svg, x, y) || { x: 0, y: 0 };
   }
 
   function getFreeRodEnd(pulleyEl) {
@@ -5221,23 +5239,11 @@
     const el = pulley.el;
     if (kind === "free") {
       const { rect, width, height } = stageSize();
-      const svg = el.querySelector("svg");
-      const hub = svg
-        ? svgUserToElLocal(svg, WHEEL.free.cx, WHEEL.free.cy)
-        : {
-            x: (el.offsetWidth || 104) * 0.5,
-            y: (el.offsetHeight || 160) * 0.5,
-          };
-      el.style.left = `${clamp(
-        e.clientX - rect.left - hub.x,
-        0,
-        Math.max(0, width - (el.offsetWidth || 104))
-      )}px`;
-      el.style.top = `${clamp(
-        e.clientY - rect.top - hub.y,
-        0,
-        Math.max(0, height - (el.offsetHeight || 160))
-      )}px`;
+      moveFreePulleyWheelTo(el, e.clientX - rect.left, e.clientY - rect.top);
+      const w = el.getBoundingClientRect().width || el.offsetWidth || 104;
+      const h = el.getBoundingClientRect().height || el.offsetHeight || 160;
+      el.style.left = `${clamp(parseFloat(el.style.left) || 0, 0, Math.max(0, width - w))}px`;
+      el.style.top = `${clamp(parseFloat(el.style.top) || 0, 0, Math.max(0, height - h))}px`;
     } else {
       placeElUnderPointer(el, e.clientX, e.clientY);
     }
@@ -5322,15 +5328,15 @@
       if (overStock) return;
       if (kind === "free") {
         const { rect, width, height } = stageSize();
-        const meta = WHEEL.free;
-        const svg = el.querySelector("svg");
-        const hub = svg
-          ? svgUserToElLocal(svg, meta.cx, meta.cy)
-          : { x: (el.offsetWidth || 104) * 0.5, y: (el.offsetHeight || 160) * 0.5 };
-        const targetCx = ev.clientX - rect.left;
-        const targetCy = ev.clientY - rect.top;
-        el.style.left = `${clamp(targetCx - hub.x, 0, Math.max(0, width - (el.offsetWidth || 104)))}px`;
-        el.style.top = `${clamp(targetCy - hub.y, 0, Math.max(0, height - (el.offsetHeight || 160)))}px`;
+        moveFreePulleyWheelTo(
+          el,
+          ev.clientX - rect.left,
+          ev.clientY - rect.top
+        );
+        const w = el.getBoundingClientRect().width || el.offsetWidth || 104;
+        const h = el.getBoundingClientRect().height || el.offsetHeight || 160;
+        el.style.left = `${clamp(parseFloat(el.style.left) || 0, 0, Math.max(0, width - w))}px`;
+        el.style.top = `${clamp(parseFloat(el.style.top) || 0, 0, Math.max(0, height - h))}px`;
       } else {
         const { rect } = stageSize();
         const x = ev.clientX - rect.left;
@@ -7072,27 +7078,48 @@
 
   function enableFreeDrag(el) {
     let dragging = false;
-    let offsetX = 0;
-    let offsetY = 0;
+    let grabOffsetX = 0;
+    let grabOffsetY = 0;
     let pointerId = null;
 
-    function pulleyKind() {
-      return findPulleyByEl(el)?.kind || el.dataset.kind || "free";
-    }
-
-    function moveTo(clientX, clientY) {
-      const { rect } = stageSize();
-      const targetCx = clientX - rect.left - offsetX;
-      const targetCy = clientY - rect.top - offsetY;
-      const wheel = getWheelWorld(el, pulleyKind());
-      const left = parseFloat(el.style.left) || 0;
-      const top = parseFloat(el.style.top) || 0;
-      el.style.left = `${left + (targetCx - wheel.cx)}px`;
-      el.style.top = `${top + (targetCy - wheel.cy)}px`;
+    function onMove(ev) {
+      if (!dragging || ev.pointerId !== pointerId) return;
+      const overStock = isOverStock(ev.clientX, ev.clientY);
+      setStockDropTarget(overStock);
+      if (overStock) return;
+      const { rect, width, height } = stageSize();
+      const elRect = el.getBoundingClientRect();
+      const w = elRect.width;
+      const h = elRect.height;
+      el.style.left = `${clamp(
+        ev.clientX - rect.left - grabOffsetX,
+        0,
+        Math.max(0, width - w)
+      )}px`;
+      el.style.top = `${clamp(
+        ev.clientY - rect.top - grabOffsetY,
+        0,
+        Math.max(0, height - h)
+      )}px`;
       rebuildAllRopes();
       syncAllWeightsToSnap();
       updateForceArrows();
       syncPulleyResizeHandle();
+    }
+
+    function endDrag(ev) {
+      if (!dragging || (ev && ev.pointerId !== pointerId)) return;
+      dragging = false;
+      pointerId = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+      el.classList.remove("is-dragging");
+      setStockDropTarget(false);
+      if (ev && isOverStock(ev.clientX, ev.clientY)) {
+        returnPulleyToStock(el);
+      }
+      endUserAction();
     }
 
     el.addEventListener("pointerdown", (e) => {
@@ -7101,38 +7128,24 @@
       if (isStockTemplate(el)) return;
       beginUserAction();
       const { rect } = stageSize();
-      const wheel = getWheelWorld(el, pulleyKind());
-      offsetX = e.clientX - rect.left - wheel.cx;
-      offsetY = e.clientY - rect.top - wheel.cy;
+      const elRect = el.getBoundingClientRect();
+      el.style.left = `${elRect.left - rect.left}px`;
+      el.style.top = `${elRect.top - rect.top}px`;
+      grabOffsetX = e.clientX - elRect.left;
+      grabOffsetY = e.clientY - elRect.top;
       dragging = true;
       pointerId = e.pointerId;
       el.classList.add("is-dragging");
-      el.setPointerCapture(e.pointerId);
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch (_) {
+        /* iPad Safari — window listenery níže */
+      }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", endDrag);
+      window.addEventListener("pointercancel", endDrag);
       e.preventDefault();
     });
-
-    el.addEventListener("pointermove", (e) => {
-      if (!dragging || e.pointerId !== pointerId) return;
-      const overStock = isOverStock(e.clientX, e.clientY);
-      setStockDropTarget(overStock);
-      if (overStock) return;
-      moveTo(e.clientX, e.clientY);
-    });
-
-    function endDrag(e) {
-      if (!dragging || (e && e.pointerId !== pointerId)) return;
-      dragging = false;
-      pointerId = null;
-      el.classList.remove("is-dragging");
-      setStockDropTarget(false);
-      if (e && isOverStock(e.clientX, e.clientY)) {
-        returnPulleyToStock(el);
-      }
-      endUserAction();
-    }
-
-    el.addEventListener("pointerup", endDrag);
-    el.addEventListener("pointercancel", endDrag);
   }
 
   function enableFixedEdgeDrag(el, initial) {
