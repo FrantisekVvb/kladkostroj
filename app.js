@@ -360,7 +360,7 @@
     syncAllWinchesToSnap();
     syncRopeEndHandles();
     updateForceArrows();
-    updateClearEnabled();
+    syncRopeCount();
   }
 
   function restoreWinchSnap(winch, snapData) {
@@ -412,6 +412,15 @@
   function syncRopeCount() {
     ropes = ropes.filter((r) => r.el.isConnected);
     updateClearEnabled();
+    syncPulleySizeSliderState();
+  }
+
+  function syncPulleySizeSliderState() {
+    if (!pulleySizeSlider) return;
+    const disabled = ropes.length > 0;
+    pulleySizeSlider.disabled = disabled;
+    const control = pulleySizeSlider.closest(".size-control");
+    if (control) control.classList.toggle("is-disabled", disabled);
   }
 
   function clamp(value, min, max) {
@@ -591,9 +600,72 @@
     return null;
   }
 
-  function isRopeEndOnEdge(rope, which) {
+  function isScreenEdgeSnap(snap) {
+    return !!(snap && (snap.type === "edge" || snap.edge));
+  }
+
+  /** Konec lana je přichycen (okraj stage nebo střed kladky). */
+  function isRopeEndSnapped(rope, which) {
     ensureRopeEdgeSnap(rope);
     return rope.edgeSnap[which] != null;
+  }
+
+  /** Konec lana je upevněn k okraji obrazovky. */
+  function isRopeEndOnEdge(rope, which) {
+    ensureRopeEdgeSnap(rope);
+    return isScreenEdgeSnap(rope.edgeSnap[which]);
+  }
+
+  /**
+   * Konec může nést tah: okraj stage, naviják, nebo střed pevné kladky.
+   * Volná kladka a volný konec lana nejsou kotva.
+   */
+  function isRopeEndAnchored(rope, which) {
+    if (winchOnRopeEnd(rope, which)) return true;
+    if (isRopeEndOnEdge(rope, which)) return true;
+    ensureRopeEdgeSnap(rope);
+    const snap = rope.edgeSnap[which];
+    if (!isPulleyCenterSnap(snap) || !snap.pulleyId) return false;
+    const pulley = findPulleyById(snap.pulleyId);
+    return !!(pulley && pulley.kind === "fixed" && !isDocked(pulley.el));
+  }
+
+  function ropeHasAnchoredEnd(rope) {
+    return isRopeEndAnchored(rope, "start") || isRopeEndAnchored(rope, "end");
+  }
+
+  /** Lano obepíná pevnou kladku — drží napětí i když oba konce nesou závaží. */
+  function ropeWrapsFixedWheel(rope, model) {
+    if (model?.wraps?.some((w) => w.wheelKind === "fixed")) return true;
+    if (rope?.wrapIds) {
+      for (const id of rope.wrapIds) {
+        const p = findPulleyById(id);
+        if (p && p.kind === "fixed" && !isDocked(p.el)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Lano může nést tah (kotva na konci, naviják, nebo obepnutí pevné kladky). */
+  function ropeCanCarryTension(rope, model) {
+    return ropeHasAnchoredEnd(rope) || ropeWrapsFixedWheel(rope, model);
+  }
+
+  /** Synchronizuj body lana s háčky závaží přichycených ke koncům. */
+  function syncRopeEndpointsFromWeights(rope) {
+    for (const which of ["start", "end"]) {
+      const w = weightOnRopeEnd(rope, which);
+      if (!w) continue;
+      const hook = getWeightHookWorld(w);
+      if (which === "start") rope.points[0] = { ...hook };
+      else rope.points[rope.points.length - 1] = { ...hook };
+    }
+  }
+
+  /** Konec lana je přichycen (závaží, naviják, okraj nebo střed kladky). */
+  function isRopeEndAttached(rope, which) {
+    if (isRopeEndTaken(rope, which, null, null)) return true;
+    return isRopeEndSnapped(rope, which);
   }
 
   function getRopeEndPoint(rope, which) {
@@ -727,7 +799,7 @@
   }
 
   function onPulleySizeSliderInput() {
-    if (!pulleySizeSlider) return;
+    if (!pulleySizeSlider || pulleySizeSlider.disabled) return;
     setPulleyScale(Number(pulleySizeSlider.value) / 100);
   }
 
@@ -1010,7 +1082,7 @@
     tpl.className = "weight is-stock-template";
     tpl.id = "stock-template-weight";
     tpl.setAttribute("role", "img");
-    tpl.setAttribute("aria-label", "Závaží — vytáhnout ze zásobníku");
+    tpl.setAttribute("aria-label", "Závaží — vytáhnout");
     tpl.innerHTML = WEIGHT_SVG;
     stockSlotWeights.appendChild(tpl);
     return tpl;
@@ -1024,7 +1096,7 @@
     tpl.className = "winch is-stock-template";
     tpl.id = "stock-template-winch";
     tpl.setAttribute("role", "img");
-    tpl.setAttribute("aria-label", "Naviják — vytáhnout ze zásobníku");
+    tpl.setAttribute("aria-label", "Naviják — vytáhnout");
     tpl.innerHTML = WINCH_SVG;
     stockSlotWinch.appendChild(tpl);
     return tpl;
@@ -1035,6 +1107,7 @@
     ropeLayer.setAttribute("viewBox", `0 0 ${width} ${height}`);
     ropeLayer.setAttribute("width", String(width));
     ropeLayer.setAttribute("height", String(height));
+    ropeLayer.setAttribute("overflow", "visible");
   }
 
   function dist(a, b) {
@@ -2791,7 +2864,7 @@
   function ropeEndIsFixed(rope, which) {
     if (winchOnRopeEnd(rope, which)) return true;
     if (weightOnRopeEnd(rope, which)) return false;
-    return isRopeEndOnEdge(rope, which);
+    return isRopeEndAnchored(rope, which);
   }
 
   /** Posun volné kladky bez rebuildAllRopes (pro constraint během integrace). */
@@ -2849,13 +2922,13 @@
         continue;
       }
       const model = computeRopeModel(rope);
-      if (!model.wraps.length) {
-        delete rope.sim;
-        continue;
-      }
       const startPt = { ...getRopeSimEndpoint(rope, "start") };
       const endPt = { ...getRopeSimEndpoint(rope, "end") };
       const restLength = measureModelLength(model, startPt, endPt);
+      if (restLength < 1) {
+        delete rope.sim;
+        continue;
+      }
       rope.sim = {
         model,
         startPt,
@@ -2890,15 +2963,11 @@
 
   function applyRopeSimEndpoints(rope, startPt, endPt) {
     const { model, restLength } = rope.sim;
-    const { height } = stageSize();
-    const floorY = height - 8;
 
     const startW = weightOnRopeEnd(rope, "start");
     const endW = weightOnRopeEnd(rope, "end");
     const startWinch = winchOnRopeEnd(rope, "start");
     const endWinch = winchOnRopeEnd(rope, "end");
-    const offS = startW ? getWeightHookOffset(startW) : { x: 0, y: 0 };
-    const offE = endW ? getWeightHookOffset(endW) : { x: 0, y: 0 };
 
     const corrected = enforceRopeLength(model, startPt, endPt, restLength, {
       startFixed: ropeEndIsFixed(rope, "start"),
@@ -2907,12 +2976,12 @@
 
     if (startWinch) {
       corrected.start = getWinchHookWorld(startWinch);
-    } else if (isRopeEndOnEdge(rope, "start") && !startW) {
+    } else if (isRopeEndSnapped(rope, "start") && !startW) {
       corrected.start = getRopeEndPoint(rope, "start");
     }
     if (endWinch) {
       corrected.end = getWinchHookWorld(endWinch);
-    } else if (isRopeEndOnEdge(rope, "end") && !endW) {
+    } else if (isRopeEndSnapped(rope, "end") && !endW) {
       corrected.end = getRopeEndPoint(rope, "end");
     }
 
@@ -2922,12 +2991,12 @@
     if (startW) {
       placeWeightAtHook(startW, {
         x: corrected.start.x,
-        y: Math.min(corrected.start.y, floorY - offS.y),
+        y: corrected.start.y,
       });
       rope.points[0] = { ...corrected.start };
     } else if (startWinch) {
       rope.points[0] = { ...corrected.start };
-    } else if (isRopeEndOnEdge(rope, "start")) {
+    } else if (isRopeEndSnapped(rope, "start")) {
       syncRopeEdgePoint(rope, "start");
     } else {
       rope.points[0] = { ...corrected.start };
@@ -2936,12 +3005,12 @@
     if (endW) {
       placeWeightAtHook(endW, {
         x: corrected.end.x,
-        y: Math.min(corrected.end.y, floorY - offE.y),
+        y: corrected.end.y,
       });
       rope.points[rope.points.length - 1] = { ...corrected.end };
     } else if (endWinch) {
       rope.points[rope.points.length - 1] = { ...corrected.end };
-    } else if (isRopeEndOnEdge(rope, "end")) {
+    } else if (isRopeEndSnapped(rope, "end")) {
       syncRopeEdgePoint(rope, "end");
     } else {
       rope.points[rope.points.length - 1] = { ...corrected.end };
@@ -2960,34 +3029,38 @@
     const endW = weightOnRopeEnd(rope, "end");
     const startWinch = winchOnRopeEnd(rope, "start");
     const endWinch = winchOnRopeEnd(rope, "end");
-    const startEdge = isRopeEndOnEdge(rope, "start") && !startW && !startWinch;
-    const endEdge = isRopeEndOnEdge(rope, "end") && !endW && !endWinch;
+    const startSnapped =
+      isRopeEndSnapped(rope, "start") && !startW && !startWinch;
+    const endSnapped = isRopeEndSnapped(rope, "end") && !endW && !endWinch;
+    const startFixed =
+      !!startWinch || (isRopeEndAnchored(rope, "start") && !startW);
+    const endFixed = !!endWinch || (isRopeEndAnchored(rope, "end") && !endW);
 
     let startPt = startWinch
       ? getWinchHookWorld(startWinch)
-      : startEdge
+      : startSnapped
         ? getRopeEndPoint(rope, "start")
         : startW
           ? getWeightHookWorld(startW)
           : { ...rope.sim.startPt };
     let endPt = endWinch
       ? getWinchHookWorld(endWinch)
-      : endEdge
+      : endSnapped
         ? getRopeEndPoint(rope, "end")
         : endW
           ? getWeightHookWorld(endW)
           : { ...rope.sim.endPt };
 
     const corrected = enforceRopeLength(model, startPt, endPt, restLength, {
-      startFixed: !!startWinch || startEdge,
-      endFixed: !!endWinch || endEdge,
+      startFixed,
+      endFixed,
     });
 
     if (startWinch) corrected.start = getWinchHookWorld(startWinch);
-    else if (startEdge) corrected.start = getRopeEndPoint(rope, "start");
+    else if (startSnapped) corrected.start = getRopeEndPoint(rope, "start");
     else if (startW) corrected.start = getWeightHookWorld(startW);
     if (endWinch) corrected.end = getWinchHookWorld(endWinch);
-    else if (endEdge) corrected.end = getRopeEndPoint(rope, "end");
+    else if (endSnapped) corrected.end = getRopeEndPoint(rope, "end");
     else if (endW) corrected.end = getWeightHookWorld(endW);
     return corrected;
   }
@@ -3265,6 +3338,9 @@
   function computeRopeDynamics(rope, model, startPt, endPt) {
     const startW = weightOnRopeEnd(rope, "start");
     const endW = weightOnRopeEnd(rope, "end");
+    const startWinch = winchOnRopeEnd(rope, "start");
+    const endWinch = winchOnRopeEnd(rope, "end");
+    const hasAnchor = ropeCanCarryTension(rope, model);
     const freePulley = getRopeFreePulley(rope, model);
     const hasFree = !!freePulley || ropeWrapsFreeWheel(rope);
     const pulleyEl = freePulley?.el || null;
@@ -3305,9 +3381,17 @@
     }
 
     let tension = 0;
-    if (Math.abs(denominator) > 1e-8) {
+    if (hasAnchor && Math.abs(denominator) > 1e-8) {
       tension = -numerator / denominator;
       if (tension < 0) tension = 0;
+    }
+    if (hasAnchor && tension < 1e-6) {
+      const eqT = displayEquilibriumTension(rope, {
+        attach,
+        startMass,
+        endMass,
+      });
+      if (eqT > tension) tension = eqT;
     }
 
     const accel = {
@@ -3368,10 +3452,30 @@
     };
   }
 
+  /**
+   * Statické napětí pro zobrazení šipek, když dynamický výpočet dá T≈0
+   * (např. dvě stejná závaží v rovnováze nad pevnou kladkou).
+   */
+  function displayEquilibriumTension(rope, dyn) {
+    const candidates = [];
+    const startW = weightOnRopeEnd(rope, "start");
+    const endW = weightOnRopeEnd(rope, "end");
+    if (startW && dyn.startMass > 1e-8) {
+      const uy = dyn.attach.startU.y;
+      if (uy < -0.05) candidates.push((dyn.startMass * GRAVITY) / -uy);
+    }
+    if (endW && dyn.endMass > 1e-8) {
+      const uy = dyn.attach.endU.y;
+      if (uy < -0.05) candidates.push((dyn.endMass * GRAVITY) / -uy);
+    }
+    if (!candidates.length) return 0;
+    return candidates.reduce((a, b) => a + b, 0) / candidates.length;
+  }
+
   /** Stav lana pro výpočet sil — i mimo simulaci. */
   function getRopeForceState(rope) {
     if (!rope?.el?.isConnected || rope.closed) return null;
-    if (rope.sim?.model?.wraps?.length) {
+    if (rope.sim?.model) {
       return {
         model: rope.sim.model,
         startPt: { ...rope.sim.startPt },
@@ -3379,12 +3483,15 @@
       };
     }
     syncRopeEdgePoints(rope);
+    syncRopeEndpointsFromWeights(rope);
     const model = computeRopeModel(rope);
-    if (!model.wraps.length) return null;
+    const startPt = getRopeSimEndpoint(rope, "start");
+    const endPt = getRopeSimEndpoint(rope, "end");
+    if (dist(startPt, endPt) < 1e-6) return null;
     return {
       model,
-      startPt: { ...getRopeSimEndpoint(rope, "start") },
-      endPt: { ...getRopeSimEndpoint(rope, "end") },
+      startPt: { ...startPt },
+      endPt: { ...endPt },
     };
   }
 
@@ -3411,20 +3518,22 @@
     overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
     overlay.setAttribute("width", String(width));
     overlay.setAttribute("height", String(height));
+    overlay.setAttribute("overflow", "visible");
   }
 
   function clearForceArrows() {
     if (forceLayer) forceLayer.replaceChildren();
   }
 
-  function scaleForceArrow(fx, fy) {
+  function scaleForceArrow(fx, fy, kind) {
     const mag = Math.hypot(fx, fy);
     if (mag < 1e-6) return null;
     // Délka podle násobku tíhy jednoho závaží — stack 2×/3× se vizuálně prodlouží
     const unit = WEIGHT_MASS * GRAVITY;
+    const minLen = kind === "net" ? 0 : FORCE_ARROW_MIN;
     const len = clamp(
       (mag / unit) * FORCE_ARROW_UNIT_LEN,
-      FORCE_ARROW_MIN,
+      minLen,
       FORCE_ARROW_MAX
     );
     return {
@@ -3434,8 +3543,39 @@
     };
   }
 
+  function shouldDrawNetForce(nx, ny, refMag) {
+    if (refMag < 1e-6) return false;
+    return Math.hypot(nx, ny) > refMag * 0.06;
+  }
+
+  /** Tah pro zobrazení u konkrétního závaží — v rovnováze vyváží tíhu podél lana. */
+  function tensionForWeightDisplay(mass, attachU, globalT) {
+    const gy = mass * GRAVITY;
+    const nx = globalT * attachU.x;
+    const ny = gy + globalT * attachU.y;
+    if (Math.hypot(nx, ny) > gy * 0.08) return globalT;
+    const uy = attachU.y;
+    if (uy >= -0.05) return globalT;
+    return gy / -uy;
+  }
+
+  function drawWeightForceTriad(origin, mass, attachU, globalT) {
+    const gx = 0;
+    const gy = mass * GRAVITY;
+    const T = tensionForWeightDisplay(mass, attachU, globalT);
+    const tx = T * attachU.x;
+    const ty = T * attachU.y;
+    const nx = gx + tx;
+    const ny = gy + ty;
+    drawForceArrow(origin, gx, gy, "gravity");
+    drawForceArrow(origin, tx, ty, "tension");
+    if (shouldDrawNetForce(nx, ny, gy)) {
+      drawForceArrow(origin, nx, ny, "net");
+    }
+  }
+
   function drawForceArrow(origin, fx, fy, kind) {
-    const scaled = scaleForceArrow(fx, fy);
+    const scaled = scaleForceArrow(fx, fy, kind);
     if (!scaled) return;
     const layer = ensureForceLayer();
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -3503,25 +3643,21 @@
       const rodW = dyn.rodW;
 
       if (startW) {
-        const origin = getWeightHookWorld(startW);
-        const gx = 0;
-        const gy = dyn.startMass * GRAVITY;
-        const tx = T * dyn.attach.startU.x;
-        const ty = T * dyn.attach.startU.y;
-        drawForceArrow(origin, gx, gy, "gravity");
-        drawForceArrow(origin, tx, ty, "tension");
-        drawForceArrow(origin, gx + tx, gy + ty, "net");
+        drawWeightForceTriad(
+          getWeightHookWorld(startW),
+          dyn.startMass,
+          dyn.attach.startU,
+          T
+        );
       }
 
       if (endW) {
-        const origin = getWeightHookWorld(endW);
-        const gx = 0;
-        const gy = dyn.endMass * GRAVITY;
-        const tx = T * dyn.attach.endU.x;
-        const ty = T * dyn.attach.endU.y;
-        drawForceArrow(origin, gx, gy, "gravity");
-        drawForceArrow(origin, tx, ty, "tension");
-        drawForceArrow(origin, gx + tx, gy + ty, "net");
+        drawWeightForceTriad(
+          getWeightHookWorld(endW),
+          dyn.endMass,
+          dyn.attach.endU,
+          T
+        );
       }
 
       if (hasFree && dyn.freePulley) {
@@ -3548,13 +3684,15 @@
 
         if (rodW) {
           const hook = getWeightHookWorld(rodW);
+          const rodMass = massOfWeightStack(rodW);
+          const gx = 0;
+          const gy = rodMass * GRAVITY;
+          const nx = gx + t1x + t2x;
+          const ny = gy + t1y + t2y;
           drawForceArrow(hook, gx, gy, "gravity");
-          drawForceArrow(
-            hook,
-            gx + t1x + t2x,
-            gy + t1y + t2y,
-            "net"
-          );
+          if (shouldDrawNetForce(nx, ny, gy)) {
+            drawForceArrow(hook, nx, ny, "net");
+          }
         }
       }
 
@@ -3577,7 +3715,6 @@
 
     const { model, restLength } = rope.sim;
     const { height, width } = stageSize();
-    const floorY = height - 8;
 
     let startPt = { ...rope.sim.startPt };
     let endPt = { ...rope.sim.endPt };
@@ -3629,7 +3766,7 @@
       startPt.y += startW.vel.y * dt;
     } else if (startWinch) {
       startPt = getWinchHookWorld(startWinch);
-    } else if (isRopeEndOnEdge(rope, "start")) {
+    } else if (isRopeEndSnapped(rope, "start")) {
       startPt = getRopeEndPoint(rope, "start");
     }
 
@@ -3640,7 +3777,7 @@
       endPt.y += endW.vel.y * dt;
     } else if (endWinch) {
       endPt = getWinchHookWorld(endWinch);
-    } else if (isRopeEndOnEdge(rope, "end")) {
+    } else if (isRopeEndSnapped(rope, "end")) {
       endPt = getRopeEndPoint(rope, "end");
     }
 
@@ -3651,13 +3788,11 @@
       offS.x,
       width - (startW?.el.offsetWidth || 70) + offS.x
     );
-    startPt.y = Math.min(startPt.y, floorY);
     endPt.x = clamp(
       endPt.x,
       offE.x,
       width - (endW?.el.offsetWidth || 70) + offE.x
     );
-    endPt.y = Math.min(endPt.y, floorY);
 
     if (hasFree && freePulley) {
       freePulley.vel.x = accel.pulley.x;
@@ -3676,19 +3811,19 @@
       endPt,
       rope.sim.restLength,
       {
-        startFixed: !!startWinch || (isRopeEndOnEdge(rope, "start") && !startW),
-        endFixed: !!endWinch || (isRopeEndOnEdge(rope, "end") && !endW),
+        startFixed: !!startWinch || (isRopeEndAnchored(rope, "start") && !startW),
+        endFixed: !!endWinch || (isRopeEndAnchored(rope, "end") && !endW),
       }
     );
 
     if (startWinch) {
       corrected.start = getWinchHookWorld(startWinch);
-    } else if (isRopeEndOnEdge(rope, "start") && !startW) {
+    } else if (isRopeEndSnapped(rope, "start") && !startW) {
       corrected.start = getRopeEndPoint(rope, "start");
     }
     if (endWinch) {
       corrected.end = getWinchHookWorld(endWinch);
-    } else if (isRopeEndOnEdge(rope, "end") && !endW) {
+    } else if (isRopeEndSnapped(rope, "end") && !endW) {
       corrected.end = getRopeEndPoint(rope, "end");
     }
 
@@ -3702,21 +3837,12 @@
         freePulley,
         rope
       );
-      if (isRopeEndOnEdge(rope, "start") && !startW && !startWinch) {
+      if (isRopeEndSnapped(rope, "start") && !startW && !startWinch) {
         corrected.start = getRopeEndPoint(rope, "start");
       }
-      if (isRopeEndOnEdge(rope, "end") && !endW && !endWinch) {
+      if (isRopeEndSnapped(rope, "end") && !endW && !endWinch) {
         corrected.end = getRopeEndPoint(rope, "end");
       }
-    }
-
-    if (startW && corrected.start.y >= floorY - offS.y - 0.5) {
-      startW.vel.x = 0;
-      startW.vel.y = 0;
-    }
-    if (endW && corrected.end.y >= floorY - offE.y - 0.5) {
-      endW.vel.x = 0;
-      endW.vel.y = 0;
     }
 
     applyRopeSimEndpoints(rope, corrected.start, corrected.end);
@@ -3848,11 +3974,10 @@
 
   function placeWeightAtHook(weight, point) {
     const off = getWeightHookOffset(weight);
-    const { width, height } = stageSize();
+    const { width } = stageSize();
     const w = weight.el.offsetWidth || 70;
-    const h = weight.el.offsetHeight || 67;
     const left = clamp(point.x - off.x, 0, Math.max(0, width - w));
-    const top = clamp(point.y - off.y, 0, Math.max(0, height - h));
+    const top = Math.max(0, point.y - off.y);
     weight.el.style.left = `${left}px`;
     weight.el.style.top = `${top}px`;
   }
@@ -3976,7 +4101,8 @@
             ? rope.sim.startPt
             : rope.sim.endPt;
       } else {
-        pt = getRopeEndPoint(rope, weight.snap.which);
+        pt = getWeightHookWorld(weight);
+        syncRopeEndpointsFromWeights(rope);
       }
       placeWeightAtHook(weight, pt);
     }
@@ -4009,8 +4135,15 @@
       };
       ensureRopeEdgeSnap(target.rope);
       target.rope.edgeSnap[target.which] = null;
-      placeWeightAtHook(weight, target.point);
+      const hook = getWeightHookWorld(weight);
+      if (target.which === "start") target.rope.points[0] = { ...hook };
+      else {
+        target.rope.points[target.rope.points.length - 1] = { ...hook };
+      }
+      placeWeightAtHook(weight, hook);
+      rebuildRope(target.rope);
     }
+    syncRopeEndHandles();
     updateForceArrows();
   }
 
@@ -4042,6 +4175,7 @@
       pointerId = e.pointerId;
       detachWeightsFrom(weight);
       weight.snap = { type: "free" };
+      syncRopeEndHandles();
       weight.el.classList.add("is-dragging");
       weight.el.setPointerCapture(e.pointerId);
       e.preventDefault();
@@ -4627,6 +4761,7 @@
     for (const rope of ropes) {
       if (!rope.el.isConnected || rope.closed) continue;
       for (const end of ropeEnds(rope)) {
+        if (isRopeEndAttached(rope, end.which)) continue;
         const handle = document.createElementNS(
           "http://www.w3.org/2000/svg",
           "circle"
@@ -4664,13 +4799,7 @@
     }
     syncRopeEdgePoint(rope, which);
     rebuildRope(rope);
-    if (handleEl) {
-      const pt = getRopeEndPoint(rope, which);
-      handleEl.setAttribute("cx", pt.x.toFixed(2));
-      handleEl.setAttribute("cy", pt.y.toFixed(2));
-    } else {
-      syncRopeEndHandles();
-    }
+    syncRopeEndHandles();
     syncAllWeightsToSnap();
     updateForceArrows();
   }
@@ -5336,19 +5465,16 @@
   }
 
   function clampWeightHook(weight, point) {
-    const { width, height } = stageSize();
+    const { width } = stageSize();
     const off = getWeightHookOffset(weight);
-    const floorY = height - 8;
-    const p = {
+    return {
       x: clamp(
         point.x,
         off.x,
         width - (weight.el.offsetWidth - off.x)
       ),
-      y: clamp(point.y, off.y, floorY),
+      y: Math.max(off.y, point.y),
     };
-    if (p.y >= floorY - 0.5) weight.vel.y = 0;
-    return p;
   }
 
   function moveFreePulleyBy(pulley, dx, dy) {
@@ -5595,6 +5721,7 @@
 
   syncRopeViewBox();
   updateClearEnabled();
+  syncPulleySizeSliderState();
   updateHistoryButtons();
   syncForcesToggleUi();
 
