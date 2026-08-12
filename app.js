@@ -100,7 +100,7 @@
     return `${WEIGHT_SVG}<span class="weight-label" aria-hidden="true">${WEIGHT_LABEL_TEXT}</span>`;
   }
 
-  const WINCH_SVG = `<svg width="134" height="132" viewBox="0 0 134 132" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0.5" y="48.5" width="133" height="83" rx="12" ry="12" fill="#D9D9D9" stroke="black"/><circle cx="67" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M66.6989 80.4041C83.6555 80.4041 97.4015 66.6581 97.4015 49.7015C97.4015 32.745 83.6555 18.999 66.6989 18.999C49.7423 18.999 35.9963 32.745 35.9963 49.7015C35.9963 66.6581 49.7423 80.4041 66.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.7016 85.4031C86.419 85.4031 102.403 69.419 102.403 49.7016C102.403 29.9841 86.419 14 66.7016 14C46.9841 14 31 29.9841 31 49.7016C31 69.419 46.9841 85.4031 66.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M99.2331 49.7016C99.2331 67.665 84.6701 82.2335 66.7012 82.2335C48.7323 82.2335 34.1693 67.6705 34.1693 49.7016C34.1693 31.7327 48.7323 17.1697 66.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.9513 49.7234H93.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M47.7767 30.8317L85.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M85.5548 30.8317L47.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M41.8699 39.7641L91.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M76.614 24.9374L56.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M56.1691 25.1571L77.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M91.2219 39.2367L42.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="67" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/><text class="winch-force-text" x="67" y="119.5" text-anchor="middle" dominant-baseline="central" fill="#4A43E8" font-size="15" font-weight="700" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"></text></svg>`;
+  const WINCH_SVG = `<svg width="134" height="132" viewBox="0 0 134 132" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0.5" y="48.5" width="133" height="83" rx="12" ry="12" fill="#D9D9D9" stroke="black"/><circle cx="67" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M66.6989 80.4041C83.6555 80.4041 97.4015 66.6581 97.4015 49.7015C97.4015 32.745 83.6555 18.999 66.6989 18.999C49.7423 18.999 35.9963 32.745 35.9963 49.7015C35.9963 66.6581 49.7423 80.4041 66.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.7016 85.4031C86.419 85.4031 102.403 69.419 102.403 49.7016C102.403 29.9841 86.419 14 66.7016 14C46.9841 14 31 29.9841 31 49.7016C31 69.419 46.9841 85.4031 66.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M99.2331 49.7016C99.2331 67.665 84.6701 82.2335 66.7012 82.2335C48.7323 82.2335 34.1693 67.6705 34.1693 49.7016C34.1693 31.7327 48.7323 17.1697 66.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.9513 49.7234H93.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M66.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M47.7767 30.8317L85.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M85.5548 30.8317L47.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M41.8699 39.7641L91.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M76.614 24.9374L56.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M56.1691 25.1571L77.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M91.2219 39.2367L42.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="67" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/><circle class="winch-led" cx="16" cy="118" r="6.5" fill="#5a5a5a" stroke="#1d1d1b" stroke-width="1.4"/><text class="winch-force-text" x="67" y="119.5" text-anchor="middle" dominant-baseline="central" fill="#4A43E8" font-size="15" font-weight="700" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"></text></svg>`;
 
   const WINCH = {
     vbW: 134,
@@ -143,7 +143,7 @@
   const PULLEY_CLICK_MOVE_PX = 6;
   const PULLEY_SCALE_MIN = 0.4;
   const PULLEY_SCALE_MAX = 1;
-  /** Globální měřítko kladek, závaží, navijáku a lana na ploše. */
+  /** Globální měřítko kladek, závaží a lana na ploše. */
   let globalStageScale = 0.9;
 
   const HISTORY_MAX = 40;
@@ -1430,7 +1430,7 @@
     if (leftPanel) ro.observe(leftPanel);
   }
 
-  /** Globální měřítko závaží, navijáku a tloušťky lana na ploše. */
+  /** Globální měřítko závaží a tloušťky lana na ploše. */
   function applyGlobalStageScale(scale, opts = {}) {
     const next = clamp(scale, PULLEY_SCALE_MIN, PULLEY_SCALE_MAX);
     globalStageScale = next;
@@ -1713,7 +1713,7 @@
   function placeWinchAtHook(winch, point) {
     const { width, height } = stageSize();
     const off = getWinchHookOffset(winch);
-    const w = winch.el.offsetWidth || 100;
+    const w = winch.el.offsetWidth || 110;
     const h = winch.el.offsetHeight || 98;
     const left = clamp(point.x - off.x, 0, Math.max(0, width - w));
     const top = clamp(point.y - off.y, 0, Math.max(0, height - h));
@@ -1749,7 +1749,22 @@
     winch.winding = mode === "winding";
     winch.el.classList.toggle("is-winding", mode === "winding");
     winch.el.classList.toggle("is-overload", mode === "overload");
+    syncWinchAttachedLight(winch);
     updateWinchOverloadMessage();
+  }
+
+  function syncWinchAttachedLight(winch) {
+    if (!winch?.el) return;
+    const attached =
+      !isDocked(winch.el) &&
+      !isStockTemplate(winch.el) &&
+      winch.snap?.type === "rope" &&
+      !!winch.snap.rope?.el?.isConnected;
+    winch.el.classList.toggle("is-snapped", attached);
+    winch.el.setAttribute(
+      "aria-label",
+      attached ? "Naviják přimknutý k lanu" : "Naviják"
+    );
   }
 
   function updateWinchOverloadMessage() {
@@ -1761,7 +1776,10 @@
   }
 
   function syncWinchToSnap(winch) {
-    if (winch.dragging || isDocked(winch.el)) return;
+    if (winch.dragging || isDocked(winch.el)) {
+      syncWinchAttachedLight(winch);
+      return;
+    }
     if (winch.snap.type !== "rope") {
       setWinchWinding(winch, false);
       return;
@@ -1782,6 +1800,7 @@
     // Naviják je kotva — přichytí lano k sobě, ne naopak
     // (sync během sim řeší getRopeSimEndpoint)
     if (!running) placeWinchAtHook(winch, pt);
+    syncWinchAttachedLight(winch);
   }
 
   function syncAllWinchesToSnap() {
@@ -5745,6 +5764,7 @@
     rebuildRope(target.rope, { preserveWraps: true });
     syncRopeEndHandles();
     hideSnapMarker();
+    syncWinchAttachedLight(winch);
     updateForceArrows();
   }
 
@@ -5791,7 +5811,7 @@
       }
       const p = stagePoint(e);
       const { width, height } = stageSize();
-      const w = winch.el.offsetWidth || 100;
+      const w = winch.el.offsetWidth || 110;
       const h = winch.el.offsetHeight || 98;
       winch.el.style.left = `${clamp(p.x - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(p.y - grabOffsetY, 0, Math.max(0, height - h))}px`;
@@ -5850,7 +5870,7 @@
         return;
       }
       const { rect, width, height } = stageSize();
-      const w = winch.el.offsetWidth || 100;
+      const w = winch.el.offsetWidth || 110;
       const h = winch.el.offsetHeight || 98;
       winch.el.style.left = `${clamp(ev.clientX - rect.left - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(ev.clientY - rect.top - grabOffsetY, 0, Math.max(0, height - h))}px`;
@@ -6159,6 +6179,7 @@
     rebuildRope(rope, { preserveWraps: true });
     syncRopeEndHandles();
     syncAllWeightsToSnap();
+    syncWinchAttachedLight(winch);
     updateForceArrows();
   }
 

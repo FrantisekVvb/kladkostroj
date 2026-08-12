@@ -581,7 +581,7 @@
       .winch svg {
         display: block;
         pointer-events: none;
-        width: calc(100px * var(--pulley-scale));
+        width: 110px;
         height: auto;
       }
 
@@ -604,6 +604,18 @@
         border-radius: 8px;
       }
 
+      .winch-led {
+        fill: #5a5a5a;
+        stroke: #1d1d1b;
+        stroke-width: 1.4;
+        transition: fill 0.18s ease, filter 0.18s ease;
+      }
+
+      .winch.is-snapped .winch-led {
+        fill: #22c55e;
+        filter: drop-shadow(0 0 5px #4ade80);
+      }
+
       .winch-drum {
         transform-origin: 67px 50px;
       }
@@ -612,6 +624,24 @@
         fill: none;
         stroke: #ffffff;
         transition: stroke 0.15s ease;
+      }
+
+      .winch.is-overload .winch-led {
+        fill: #ef4444;
+        filter: drop-shadow(0 0 5px #f87171);
+        animation: winch-led-overload 0.75s ease-in-out infinite;
+      }
+
+      @keyframes winch-led-overload {
+        0%,
+        100% {
+          fill: #ef4444;
+          opacity: 1;
+        }
+        50% {
+          fill: #ef4444;
+          opacity: 0.2;
+        }
       }
 
       .winch.is-winding .winch-light {
