@@ -616,10 +616,6 @@
         filter: drop-shadow(0 0 5px #4ade80);
       }
 
-      .winch-drum {
-        transform-origin: 67px 50px;
-      }
-
       .winch-light {
         fill: none;
         stroke: #ffffff;
@@ -665,10 +661,6 @@
         }
       }
 
-      .winch.is-winding .winch-drum {
-        animation: winch-spin 2.8s linear infinite;
-      }
-
       .winch-force-text {
         fill: #4a43e8;
         pointer-events: none;
@@ -704,12 +696,6 @@
       .winch.is-stock-template .winch-force-text,
       .winch.is-docked .winch-force-text {
         display: none;
-      }
-
-      @keyframes winch-spin {
-        to {
-          transform: rotate(360deg);
-        }
       }
 
       .winch-overload-msg {
@@ -1036,6 +1022,34 @@
       .force-arrow.is-net .force-arrow-head {
         stroke: #15803d;
         fill: none;
+      }
+
+      .force-arrow-label {
+        font-size: 12px;
+        font-weight: 700;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        paint-order: stroke fill;
+        stroke: #ffffff;
+        stroke-width: 3.5px;
+        stroke-linejoin: round;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .force-arrow.is-gravity .force-arrow-label {
+        fill: #c2410c;
+      }
+
+      .force-arrow.is-tension .force-arrow-label {
+        fill: #be185d;
+      }
+
+      .force-arrow.is-net .force-arrow-label {
+        fill: #166534;
+      }
+
+      .force-arrow.is-winch .force-arrow-label {
+        fill: #6d28d9;
       }
 
       .size-control {
