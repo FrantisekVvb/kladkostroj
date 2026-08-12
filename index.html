@@ -8,10 +8,36 @@
     />
     <title>Kladkostroj</title>
     <style>
+      @font-face {
+        font-family: "Fenomen Sans";
+        src: url("assets/fonts/FenomenSans-Book.otf") format("opentype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: "Fenomen Sans";
+        src: url("assets/fonts/FenomenSans-SemiBold.otf") format("opentype");
+        font-weight: 600;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: "Fenomen Sans";
+        src: url("assets/fonts/FenomenSans-SemiBold.otf") format("opentype");
+        font-weight: 700;
+        font-style: normal;
+        font-display: swap;
+      }
+
       * {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
+        user-select: none;
+        -webkit-user-select: none;
       }
 
       :root {
@@ -24,7 +50,7 @@
         --border: #e8eaef;
         --area-muted: #eceff5;
         --readout-bg: #ffffff;
-        --font-app: ui-sans-serif, system-ui, sans-serif;
+        --font-app: "Fenomen Sans", ui-sans-serif, system-ui, sans-serif;
         --pulley-scale: 0.9;
         --pulley-fixed-max: 125px;
         --pulley-free-max: 116px;
@@ -384,7 +410,7 @@
 
       .winch {
         position: absolute;
-        z-index: 3;
+        z-index: 6;
         cursor: grab;
         touch-action: none;
         line-height: 0;
@@ -393,13 +419,13 @@
       .winch:active,
       .winch.is-dragging {
         cursor: grabbing;
-        z-index: 11;
+        z-index: 12;
       }
 
       .winch svg {
         display: block;
         pointer-events: none;
-        width: 86px;
+        width: calc(80px * var(--pulley-scale));
         height: auto;
       }
 
@@ -413,26 +439,44 @@
 
       .winch.is-docked svg,
       .winch.is-stock-template svg {
-        width: 64px;
+        width: 60px;
       }
 
       .winch.is-snapping {
         outline: 2px dashed #58a1ff;
         outline-offset: 2px;
-        border-radius: 6px;
+        border-radius: 50%;
+      }
+
+      .winch-drum {
+        transform-origin: 50px 50px;
       }
 
       .winch-light {
-        fill: #ffffff;
-        transition: fill 0.15s ease;
+        fill: none;
+        stroke: #ffffff;
+        transition: stroke 0.15s ease;
       }
 
       .winch.is-winding .winch-light {
-        fill: #22c55e;
+        stroke: #22c55e;
       }
 
       .winch.is-overload .winch-light {
-        fill: #ef4444;
+        transition: none;
+        animation: winch-overload-blink 0.75s ease-in-out infinite;
+      }
+
+      @keyframes winch-overload-blink {
+        0%,
+        100% {
+          stroke: #ef4444;
+          opacity: 1;
+        }
+        50% {
+          stroke: #ef4444;
+          opacity: 0.15;
+        }
       }
 
       .winch.is-winding .winch-drum {
@@ -442,6 +486,39 @@
       @keyframes winch-spin {
         to {
           transform: rotate(360deg);
+        }
+      }
+
+      .winch-overload-msg {
+        position: absolute;
+        inset: 0;
+        z-index: 14;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        pointer-events: none;
+        font-weight: 700;
+        font-size: clamp(1rem, 2.8vw, 1.35rem);
+        letter-spacing: -0.02em;
+        text-align: center;
+        color: #dc2626;
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      .winch-overload-msg.is-visible {
+        visibility: visible;
+        animation: winch-overload-msg-blink 0.75s ease-in-out infinite;
+      }
+
+      @keyframes winch-overload-msg-blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.18;
         }
       }
 
@@ -555,6 +632,7 @@
         stroke-width: 2;
         cursor: grab;
         pointer-events: none;
+        r: calc(var(--end-handle-r, 24px));
       }
 
       .rope-end-handle.is-dragging {
@@ -887,7 +965,15 @@
       <div class="workspace">
         <div id="stage" aria-label="Plocha s kladkami">
           <svg id="rope-layer" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
-</div>
+        </div>
+        <div
+          id="winch-overload-msg"
+          class="winch-overload-msg"
+          hidden
+          aria-live="polite"
+        >
+          Příliš velká zátěž!
+        </div>
       </div>
     </div>
 

@@ -14,6 +14,7 @@
   const stockSlotFree = document.getElementById("stock-slot-free");
   const stockSlotWeights = document.getElementById("stock-slot-weights");
   const stockSlotWinch = document.getElementById("stock-slot-winch");
+  const winchOverloadMsg = document.getElementById("winch-overload-msg");
   const stockTemplateFixed = document.getElementById("stock-template-fixed");
   const stockTemplateFree = document.getElementById("stock-template-free");
 
@@ -77,13 +78,13 @@
 
   const WEIGHT_SVG = `<svg width="280" height="269" viewBox="0 0 280 269" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="138" cy="50" r="45" stroke="#858585" stroke-width="10"/><path d="M267.34 269H12.3699C6.00343 269 1.2579 263.13 2.59185 256.905L43.3061 66.9047C44.2941 62.294 48.3688 59 53.0842 59H222.101C226.732 59 230.757 62.1791 231.829 66.6838L277.068 256.684C278.564 262.968 273.799 269 267.34 269Z" fill="#858585"/></svg>`;
 
-  const WINCH_SVG = `<svg width="129" height="85" viewBox="0 0 129 85" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="129" height="85" rx="6" fill="black"/><g transform="translate(74.7 41.7016)"><g class="winch-drum"><g transform="translate(-74.7 -41.7016)"><path d="M74.6989 72.4041C91.6555 72.4041 105.402 58.6581 105.402 41.7015C105.402 24.745 91.6555 10.999 74.6989 10.999C57.7423 10.999 43.9963 24.745 43.9963 41.7015C43.9963 58.6581 57.7423 72.4041 74.6989 72.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M74.7016 77.4031C94.419 77.4031 110.403 61.419 110.403 41.7016C110.403 21.9841 94.419 6 74.7016 6C54.9841 6 39 21.9841 39 41.7016C39 61.419 54.9841 77.4031 74.7016 77.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M107.233 41.7016C107.233 59.665 92.6701 74.2335 74.7012 74.2335C56.7323 74.2335 42.1693 59.6705 42.1693 41.7016C42.1693 23.7327 56.7323 9.16968 74.7012 9.16968" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M47.9513 41.7234H101.375" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M74.6575 15.0091V68.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M55.7767 22.8317L93.5548 60.6097" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M93.5548 22.8317L55.7767 60.6097" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.8699 31.7641L99.4423 51.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M84.614 16.9374L64.7005 66.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M64.1691 17.1571L85.1429 66.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M99.2219 31.2367L50.0889 52.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g></g></g><circle class="winch-light" cx="16" cy="15" r="6" fill="white"/></svg>`;
+  const WINCH_SVG = `<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="50" fill="black"/><g class="winch-drum"><path d="M49.6989 80.4041C66.6555 80.4041 80.4015 66.6581 80.4015 49.7015C80.4015 32.745 66.6555 18.999 49.6989 18.999C32.7423 18.999 18.9963 32.745 18.9963 49.7015C18.9963 66.6581 32.7423 80.4041 49.6989 80.4041Z" fill="white" stroke="#B1B1B1" stroke-width="7.69075" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.7016 85.4031C69.419 85.4031 85.4032 69.419 85.4032 49.7016C85.4032 29.9841 69.419 14 49.7016 14C29.9841 14 14 29.9841 14 49.7016C14 69.419 29.9841 85.4031 49.7016 85.4031Z" stroke="#1D1D1B" stroke-width="3.29604" stroke-miterlimit="10" stroke-linecap="round"/><path d="M82.2331 49.7016C82.2331 67.665 67.6701 82.2335 49.7012 82.2335C31.7323 82.2335 17.1693 67.6705 17.1693 49.7016C17.1693 31.7327 31.7323 17.1697 49.7012 17.1697" stroke="white" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M22.9513 49.7234H76.3746" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M49.6575 23.0091V76.4324" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M30.7767 30.8317L68.5548 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M68.5548 30.8317L30.7767 68.6098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M24.8699 39.7641L74.4423 59.6777" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M59.614 24.9374L39.7005 74.5098" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M39.1691 25.1571L60.1429 74.29" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/><path d="M74.2219 39.2367L25.089 60.2105" stroke="#1D1D1B" stroke-width="0.54934" stroke-miterlimit="10" stroke-linecap="round"/></g><circle class="winch-light" cx="50" cy="50" r="43" stroke="white" stroke-width="5" stroke-linecap="round" stroke-dasharray="8 14" fill="none"/></svg>`;
 
   const WINCH = {
-    vbW: 129,
-    /** Úchyt lana — horní bod bubnu (odkud lano odchází). */
-    hookX: 74.7,
-    hookY: 6,
+    vbW: 100,
+    /** Úchyt lana — horní bod bubnu. */
+    hookX: 50,
+    hookY: 14,
   };
 
   const GRAVITY = 520;
@@ -101,6 +102,7 @@
   const PULLEY_MASS = 0;
   const SETTLE_MS = 100;
   let running = false;
+  let runBlocked = false;
   let settling = false;
   let settleStartTime = 0;
   let physicsFrame = null;
@@ -128,6 +130,7 @@
   function updateHistoryButtons() {
     if (btnUndo) btnUndo.disabled = historyStack.length === 0;
     if (btnReset) btnReset.disabled = preRunSnapshot == null;
+    if (btnRun) btnRun.disabled = runBlocked && tool !== "run";
   }
 
   function cloneJson(value) {
@@ -228,6 +231,7 @@
     if (!scenesEqual(actionBaseline, now)) {
       historyStack.push(actionBaseline);
       if (historyStack.length > HISTORY_MAX) historyStack.shift();
+      runBlocked = false;
     }
     actionBaseline = null;
     updateHistoryButtons();
@@ -387,6 +391,7 @@
       }
     }
     const snap = historyStack.pop();
+    runBlocked = false;
     historySuspended = true;
     actionBaseline = null;
     restoreScene(snap);
@@ -401,6 +406,7 @@
       tool = "move";
       applyToolChrome("move");
     }
+    runBlocked = false;
     historySuspended = true;
     actionBaseline = null;
     historyStack = [];
@@ -561,25 +567,68 @@
     return best;
   }
 
+  function findWeightHookSnapTarget(p) {
+    let best = null;
+    let bestDist = CLOSE_SNAP_RADIUS;
+    for (const weight of weights) {
+      if (!weight.el.isConnected || isDocked(weight.el)) continue;
+      if (weight.snap.type !== "free") continue;
+      const hook = getWeightHookWorld(weight);
+      const d = dist(p, hook);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = { type: "weight", weight, point: { ...hook }, d };
+      }
+    }
+    return best;
+  }
+
+  function findWinchHookSnapTarget(p) {
+    let best = null;
+    let bestDist = CLOSE_SNAP_RADIUS;
+    for (const winch of winches) {
+      if (!winch.el.isConnected || isDocked(winch.el)) continue;
+      if (winch.snap.type !== "free") continue;
+      const hook = getWinchHookWorld(winch);
+      const d = dist(p, hook);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = { type: "winch", winch, point: { ...hook }, d };
+      }
+    }
+    return best;
+  }
+
+  function snapTargetDistance(p, snap) {
+    if (!snap) return Infinity;
+    if (snap.d != null) return snap.d;
+    if (snap.type === "edge" || snap.edge) {
+      return snap.edge === "top" || snap.edge === "bottom"
+        ? Math.abs(p.y - snap.point.y)
+        : Math.abs(p.x - snap.point.x);
+    }
+    return dist(p, snap.point);
+  }
+
   function findFixedCenterSnapTarget(p) {
     return findPulleyCenterSnapTarget(p);
   }
 
   /**
-   * Kotva pro konec lana: střed kladky má přednost před okrajem,
-   * pokud je blíž (kladka sedí u okraje).
+   * Kotva pro konec lana: nejbližší střed kladky, háček závaží nebo okraj.
    */
   function findAnchorSnapTarget(p) {
-    const center = findPulleyCenterSnapTarget(p);
-    const edge = findEdgeSnapTarget(p);
-    if (center && edge) {
-      const edgeD =
-        edge.edge === "top" || edge.edge === "bottom"
-          ? Math.abs(p.y - edge.point.y)
-          : Math.abs(p.x - edge.point.x);
-      return center.d <= edgeD ? center : edge;
-    }
-    return center || edge;
+    const candidates = [
+      findPulleyCenterSnapTarget(p),
+      findEdgeSnapTarget(p),
+      findWeightHookSnapTarget(p),
+      findWinchHookSnapTarget(p),
+    ].filter(Boolean);
+    if (!candidates.length) return null;
+    candidates.sort(
+      (a, b) => snapTargetDistance(p, a) - snapTargetDistance(p, b)
+    );
+    return candidates[0];
   }
 
   function normalizeEndSnap(snap) {
@@ -735,9 +784,11 @@
     }
     btnRun.setAttribute("aria-pressed", String(next === "run"));
     btnRun.textContent = next === "run" ? "Zastavit" : "Spustit";
+    updateHistoryButtons();
   }
 
   function setTool(next) {
+    if (next === "run" && runBlocked) return;
     if (running && next !== "run") stopSimulation();
 
     tool = next;
@@ -772,6 +823,10 @@
 
     document.documentElement.style.setProperty("--pulley-scale", String(next));
     document.documentElement.style.setProperty(
+      "--end-handle-r",
+      `${END_GRAB_RADIUS * next}px`
+    );
+    document.documentElement.style.setProperty(
       "--rope-stroke-width",
       `${ROPE_STROKE_BASE * next}px`
     );
@@ -799,6 +854,11 @@
       placeWeightAtHook(anchor.weight, { x: anchor.x, y: anchor.y });
     }
 
+    for (const winch of winches) {
+      if (isDocked(winch.el)) continue;
+      syncWinchToSnap(winch);
+    }
+
     syncRopeViewBox();
     rebuildAllRopes();
     syncAllWeightsToSnap();
@@ -814,6 +874,8 @@
 
   function onPulleySizeSliderInput() {
     if (!pulleySizeSlider || pulleySizeSlider.disabled) return;
+    runBlocked = false;
+    updateHistoryButtons();
     setPulleyScale(Number(pulleySizeSlider.value) / 100);
   }
 
@@ -1013,8 +1075,8 @@
   function placeWinchAtHook(winch, point) {
     const { width, height } = stageSize();
     const off = getWinchHookOffset(winch);
-    const w = winch.el.offsetWidth || 86;
-    const h = winch.el.offsetHeight || 57;
+    const w = winch.el.offsetWidth || 80;
+    const h = winch.el.offsetHeight || 80;
     const left = clamp(point.x - off.x, 0, Math.max(0, width - w));
     const top = clamp(point.y - off.y, 0, Math.max(0, height - h));
     winch.el.style.left = `${left}px`;
@@ -1049,6 +1111,15 @@
     winch.winding = mode === "winding";
     winch.el.classList.toggle("is-winding", mode === "winding");
     winch.el.classList.toggle("is-overload", mode === "overload");
+    updateWinchOverloadMessage();
+  }
+
+  function updateWinchOverloadMessage() {
+    if (!winchOverloadMsg) return;
+    const show =
+      running && winches.some((w) => w.el.classList.contains("is-overload"));
+    winchOverloadMsg.classList.toggle("is-visible", show);
+    winchOverloadMsg.hidden = !show;
   }
 
   function syncWinchToSnap(winch) {
@@ -4517,6 +4588,8 @@
       };
     }
     rebuildRope(target.rope);
+    syncRopeEndHandles();
+    hideSnapMarker();
     updateForceArrows();
   }
 
@@ -4564,16 +4637,14 @@
       }
       const p = stagePoint(e);
       const { width, height } = stageSize();
-      const w = winch.el.offsetWidth || 86;
-      const h = winch.el.offsetHeight || 57;
+      const w = winch.el.offsetWidth || 80;
+      const h = winch.el.offsetHeight || 80;
       winch.el.style.left = `${clamp(p.x - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(p.y - grabOffsetY, 0, Math.max(0, height - h))}px`;
       const snap = findWinchSnapTarget(winch);
       if (snap) {
-        showSnapMarker(snap.point);
         winch.el.classList.add("is-snapping");
       } else {
-        hideSnapMarker();
         winch.el.classList.remove("is-snapping");
       }
     });
@@ -4593,7 +4664,8 @@
       }
       const snap = findWinchSnapTarget(winch);
       if (snap) applyWinchSnap(winch, snap);
-      else updateForceArrows();
+      else syncRopeEndHandles();
+      updateForceArrows();
       endUserAction();
     }
 
@@ -4624,16 +4696,14 @@
         return;
       }
       const { rect, width, height } = stageSize();
-      const w = winch.el.offsetWidth || 86;
-      const h = winch.el.offsetHeight || 57;
+      const w = winch.el.offsetWidth || 80;
+      const h = winch.el.offsetHeight || 80;
       winch.el.style.left = `${clamp(ev.clientX - rect.left - grabOffsetX, 0, Math.max(0, width - w))}px`;
       winch.el.style.top = `${clamp(ev.clientY - rect.top - grabOffsetY, 0, Math.max(0, height - h))}px`;
       const snap = findWinchSnapTarget(winch);
       if (snap) {
-        showSnapMarker(snap.point);
         winch.el.classList.add("is-snapping");
       } else {
-        hideSnapMarker();
         winch.el.classList.remove("is-snapping");
       }
     }
@@ -4654,7 +4724,8 @@
       }
       const snap = findWinchSnapTarget(winch);
       if (snap) applyWinchSnap(winch, snap);
-      else updateForceArrows();
+      else syncRopeEndHandles();
+      updateForceArrows();
       endUserAction();
     }
 
@@ -4795,6 +4866,58 @@
     }
   }
 
+  function attachRopeEndToWeight(rope, which, weight) {
+    ensureRopeEdgeSnap(rope);
+    const wn = winchOnRopeEnd(rope, which);
+    if (wn) {
+      wn.snap = { type: "free" };
+      setWinchWinding(wn, false);
+    }
+    rope.edgeSnap[which] = null;
+    weight.snap = { type: "rope", rope, which };
+    const hook = getWeightHookWorld(weight);
+    if (which === "start") rope.points[0] = { ...hook };
+    else rope.points[rope.points.length - 1] = { ...hook };
+    placeWeightAtHook(weight, hook);
+    rebuildRope(rope);
+    syncRopeEndHandles();
+    syncAllWeightsToSnap();
+    updateForceArrows();
+  }
+
+  function attachRopeEndToWinch(rope, which, winch) {
+    ensureRopeEdgeSnap(rope);
+    const w = weightOnRopeEnd(rope, which);
+    if (w) w.snap = { type: "free" };
+    const oldWinch = winchOnRopeEnd(rope, which);
+    if (oldWinch && oldWinch !== winch) {
+      oldWinch.snap = { type: "free" };
+      setWinchWinding(oldWinch, false);
+    }
+    rope.edgeSnap[which] = null;
+    winch.snap = { type: "rope", rope, which };
+    const hook = getWinchHookWorld(winch);
+    if (which === "start") rope.points[0] = { ...hook };
+    else rope.points[rope.points.length - 1] = { ...hook };
+    placeWinchAtHook(winch, hook);
+    rebuildRope(rope);
+    syncRopeEndHandles();
+    syncAllWeightsToSnap();
+    updateForceArrows();
+  }
+
+  function attachRopeEndToTarget(rope, which, snap, handleEl) {
+    if (snap?.type === "weight") {
+      attachRopeEndToWeight(rope, which, snap.weight);
+      return;
+    }
+    if (snap?.type === "winch") {
+      attachRopeEndToWinch(rope, which, snap.winch);
+      return;
+    }
+    attachRopeEndToEdge(rope, which, snap, handleEl);
+  }
+
   function attachRopeEndToEdge(rope, which, snap, handleEl) {
     ensureRopeEdgeSnap(rope);
     const w = weightOnRopeEnd(rope, which);
@@ -4885,7 +5008,7 @@
       if (attached) {
         const anchorSnap = findAnchorSnapTarget(p);
         if (anchorSnap) {
-          attachRopeEndToEdge(
+          attachRopeEndToTarget(
             dragging.rope,
             dragging.which,
             anchorSnap,
@@ -4932,7 +5055,7 @@
           ropeSnap.which
         );
       } else if (anchorSnap) {
-        attachRopeEndToEdge(
+        attachRopeEndToTarget(
           dragging.rope,
           dragging.which,
           anchorSnap,
@@ -4959,6 +5082,10 @@
     let attachFrom = null;
     /** @type {null | { edge: string, along: number }} */
     let startEdgeSnap = null;
+    /** @type {null | typeof weights[0]} */
+    let startWeightSnap = null;
+    /** @type {null | typeof winches[0]} */
+    let startWinchSnap = null;
     /** @type {string[]} kladky, kterých se tah už dotkl — zůstanou i daleko */
     let stickyIds = [];
 
@@ -5052,6 +5179,8 @@
       syncRopeViewBox();
       const p = stagePoint(e);
       startEdgeSnap = null;
+      startWeightSnap = null;
+      startWinchSnap = null;
       stickyIds = [];
       attachFrom = findSnapTarget(p, null);
       if (attachFrom) {
@@ -5061,7 +5190,13 @@
         }
       } else {
         const anchorSnap = findAnchorSnapTarget(p);
-        if (anchorSnap) {
+        if (anchorSnap?.type === "weight") {
+          startWeightSnap = anchorSnap.weight;
+          points = [{ x: anchorSnap.point.x, y: anchorSnap.point.y }];
+        } else if (anchorSnap?.type === "winch") {
+          startWinchSnap = anchorSnap.winch;
+          points = [{ x: anchorSnap.point.x, y: anchorSnap.point.y }];
+        } else if (anchorSnap) {
           startEdgeSnap = normalizeEndSnap(anchorSnap);
           points = [{ x: anchorSnap.point.x, y: anchorSnap.point.y }];
         } else {
@@ -5120,6 +5255,8 @@
         points = [];
         attachFrom = null;
         startEdgeSnap = null;
+        startWeightSnap = null;
+        startWinchSnap = null;
         stickyIds = [];
         cancelUserAction();
         return;
@@ -5128,10 +5265,14 @@
       let pts = effectivePoints();
       let closed = false;
       let edgeSnap = { start: null, end: null };
+      let endWeightSnap = null;
+      let endWinchSnap = null;
 
       const selfClose =
         !attachFrom &&
         !startEdgeSnap &&
+        !startWeightSnap &&
+        !startWinchSnap &&
         pts.length >= 4 &&
         dist(pts[pts.length - 1], pts[0]) <= CLOSE_SNAP_RADIUS;
 
@@ -5149,7 +5290,13 @@
           x: endEdgeSnap.point.x,
           y: endEdgeSnap.point.y,
         };
-        edgeSnap.end = normalizeEndSnap(endEdgeSnap);
+        if (endEdgeSnap.type === "weight") {
+          endWeightSnap = endEdgeSnap.weight;
+        } else if (endEdgeSnap.type === "winch") {
+          endWinchSnap = endEdgeSnap.winch;
+        } else {
+          edgeSnap.end = normalizeEndSnap(endEdgeSnap);
+        }
       }
 
       const exclude = draftExcludeIds(endEdgeSnap);
@@ -5212,11 +5359,15 @@
         }
         edgeSnap.start = attachFrom.rope.edgeSnap.start;
         if (attachFrom.which === "start") {
-          edgeSnap.end = endEdgeSnap ? normalizeEndSnap(endEdgeSnap) : null;
+          edgeSnap.end =
+            endEdgeSnap && endEdgeSnap.type !== "weight"
+              ? normalizeEndSnap(endEdgeSnap)
+              : null;
         } else {
-          edgeSnap.end = endEdgeSnap
-            ? normalizeEndSnap(endEdgeSnap)
-            : attachFrom.rope.edgeSnap.end;
+          edgeSnap.end =
+            endEdgeSnap && endEdgeSnap.type !== "weight"
+              ? normalizeEndSnap(endEdgeSnap)
+              : attachFrom.rope.edgeSnap.end;
         }
         stickyIds = stickyForEdgeSnap(edgeSnap, stickyIds);
         removeRope(attachFrom.rope);
@@ -5226,10 +5377,21 @@
         commitRope(draft, pts, false, edgeSnap, stickyIds);
       }
 
+      const committedEl = draft;
+      const rope = ropes.find((r) => r.el === committedEl);
+      if (rope) {
+        if (startWeightSnap) attachRopeEndToWeight(rope, "start", startWeightSnap);
+        if (endWeightSnap) attachRopeEndToWeight(rope, "end", endWeightSnap);
+        if (startWinchSnap) attachRopeEndToWinch(rope, "start", startWinchSnap);
+        if (endWinchSnap) attachRopeEndToWinch(rope, "end", endWinchSnap);
+      }
+
       draft = null;
       points = [];
       attachFrom = null;
       startEdgeSnap = null;
+      startWeightSnap = null;
+      startWinchSnap = null;
       stickyIds = [];
       endUserAction();
     }
@@ -5491,6 +5653,90 @@
     };
   }
 
+  const SIM_TOUCH_EPS = 1;
+
+  function getWeightBounds(weight) {
+    const left = parseFloat(weight.el.style.left) || 0;
+    const top = parseFloat(weight.el.style.top) || 0;
+    const w = weight.el.offsetWidth || 70;
+    const h = weight.el.offsetHeight || 67;
+    return { left, top, right: left + w, bottom: top + h };
+  }
+
+  function circleIntersectsRect(cx, cy, r, rect) {
+    const closestX = clamp(cx, rect.left, rect.right);
+    const closestY = clamp(cy, rect.top, rect.bottom);
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    return dx * dx + dy * dy <= r * r;
+  }
+
+  function isWeightExcludedFromPulleyTouch(weight, pulley) {
+    if (weight.snap.type === "rod" && weight.snap.pulley === pulley.el) return true;
+    if (weight.snap.type === "rope" && weight.snap.rope) {
+      ensureRopeEdgeSnap(weight.snap.rope);
+      const snap = weight.snap.rope.edgeSnap[weight.snap.which];
+      if (isPulleyCenterSnap(snap) && snap.pulleyId === pulley.id) return true;
+    }
+    return false;
+  }
+
+  function weightTouchesPulley(weight, pulley) {
+    if (isWeightExcludedFromPulleyTouch(weight, pulley)) return false;
+    const wheel = getWheelWorld(pulley.el, pulley.kind);
+    return circleIntersectsRect(
+      wheel.cx,
+      wheel.cy,
+      wheel.r,
+      getWeightBounds(weight)
+    );
+  }
+
+  function pulleysTouch(a, b) {
+    const wa = getWheelWorld(a.el, a.kind);
+    const wb = getWheelWorld(b.el, b.kind);
+    const d = Math.hypot(wa.cx - wb.cx, wa.cy - wb.cy);
+    return d < wa.r + wb.r - SIM_TOUCH_EPS;
+  }
+
+  /** Volná kladka u horního/levého/pravého okraje — spodní okraj je povolený. */
+  function isFreePulleyTouchingNonBottomEdge(pulley) {
+    const el = pulley.el;
+    const { width } = stageSize();
+    const left = parseFloat(el.style.left) || 0;
+    const top = parseFloat(el.style.top) || 0;
+    const w = el.offsetWidth || 0;
+    if (left <= SIM_TOUCH_EPS) return true;
+    if (top <= SIM_TOUCH_EPS) return true;
+    if (left >= width - w - SIM_TOUCH_EPS) return true;
+    return false;
+  }
+
+  function shouldAbortSimulation() {
+    const active = pulleys.filter((p) => !isDocked(p.el));
+
+    for (let i = 0; i < active.length; i += 1) {
+      for (let j = i + 1; j < active.length; j += 1) {
+        if (pulleysTouch(active[i], active[j])) return true;
+      }
+    }
+
+    for (const pulley of active) {
+      if (pulley.kind === "free" && isFreePulleyTouchingNonBottomEdge(pulley)) {
+        return true;
+      }
+    }
+
+    for (const weight of weights) {
+      if (isDocked(weight.el)) continue;
+      for (const pulley of active) {
+        if (weightTouchesPulley(weight, pulley)) return true;
+      }
+    }
+
+    return false;
+  }
+
   function moveFreePulleyBy(pulley, dx, dy) {
     const el = pulley?.el;
     if (!el || isDocked(el)) return;
@@ -5582,11 +5828,16 @@
       lastPhysicsTime = now;
       physicsStep(dt);
     }
+    if (shouldAbortSimulation()) {
+      runBlocked = true;
+      setTool("move");
+      return;
+    }
     physicsFrame = requestAnimationFrame(physicsLoop);
   }
 
   function startSimulation() {
-    if (running) return;
+    if (running || runBlocked) return;
     preRunSnapshot = captureScene();
     updateHistoryButtons();
     running = true;
@@ -5597,6 +5848,7 @@
     clearEndHandles();
     hideSnapMarker();
     updateForceArrows();
+    updateWinchOverloadMessage();
     lastPhysicsTime = performance.now();
     physicsFrame = requestAnimationFrame(physicsLoop);
   }
@@ -5613,6 +5865,7 @@
     syncAllWinchesToSnap();
     syncRopeEndHandles();
     updateForceArrows();
+    updateWinchOverloadMessage();
     if (physicsFrame != null) {
       cancelAnimationFrame(physicsFrame);
       physicsFrame = null;
