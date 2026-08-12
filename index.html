@@ -122,7 +122,7 @@
       }
 
       .panel-actions--tools {
-        grid-template-columns: 1fr 1fr auto;
+        grid-template-columns: 1fr 1fr 1fr auto;
       }
 
       .action-btn {
@@ -282,11 +282,13 @@
         overflow: hidden;
       }
 
-      .app-root[data-tool="pencil"] #stage {
+      .app-root[data-tool="pencil"] #stage,
+      .app-root[data-tool="freehand"] #stage {
         cursor: crosshair;
       }
 
-      .app-root[data-tool="pencil"] .stock-section {
+      .app-root[data-tool="pencil"] .stock-section,
+      .app-root[data-tool="freehand"] .stock-section {
         opacity: 0.45;
         filter: grayscale(0.35);
         pointer-events: none;
@@ -297,7 +299,8 @@
         cursor: pointer;
       }
 
-      .app-root[data-tool="pencil"] .pulley {
+      .app-root[data-tool="pencil"] .pulley,
+      .app-root[data-tool="freehand"] .pulley {
         pointer-events: none;
       }
 
@@ -522,7 +525,8 @@
         }
       }
 
-      .app-root[data-tool="pencil"] .winch {
+      .app-root[data-tool="pencil"] .winch,
+      .app-root[data-tool="freehand"] .winch {
         pointer-events: none;
       }
 
@@ -553,7 +557,8 @@
         border-radius: 4px;
       }
 
-      .app-root[data-tool="pencil"] .weight {
+      .app-root[data-tool="pencil"] .weight,
+      .app-root[data-tool="freehand"] .weight {
         pointer-events: none;
       }
 
@@ -582,7 +587,8 @@
         pointer-events: none;
       }
 
-      .app-root[data-tool="pencil"] #rope-layer {
+      .app-root[data-tool="pencil"] #rope-layer,
+      .app-root[data-tool="freehand"] #rope-layer {
         pointer-events: auto;
         touch-action: none;
       }
@@ -621,9 +627,61 @@
         opacity: 1;
       }
 
+      .rope-path.is-freehand-draft {
+        stroke: #475569;
+        stroke-width: var(--rope-stroke-width-draft);
+        opacity: 0.9;
+        stroke-dasharray: none;
+      }
+
+      .rope-path.is-freehand-pending {
+        stroke: #0f172a;
+        opacity: 1;
+      }
+
+      .freehand-confirm {
+        position: absolute;
+        left: 50%;
+        bottom: 16px;
+        z-index: 40;
+        display: flex;
+        gap: 8px;
+        transform: translateX(-50%);
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+      }
+
+      .freehand-confirm[hidden] {
+        display: none;
+      }
+
+      .freehand-confirm .action-btn {
+        min-width: 96px;
+      }
+
+      .freehand-confirm .action-btn--ok {
+        border-color: #16a34a;
+        background: #16a34a;
+        color: #fff;
+      }
+
+      .freehand-confirm .action-btn--ok:hover:not(:disabled) {
+        border-color: #15803d;
+        background: #15803d;
+        color: #fff;
+      }
+
       .app-root[data-tool="move"] #rope-layer .rope-end-handle {
         pointer-events: auto;
         touch-action: none;
+      }
+
+      .app-root[data-tool="pencil"] #rope-layer .rope-end-handle,
+      .app-root[data-tool="freehand"] #rope-layer .rope-end-handle {
+        pointer-events: none;
       }
 
       .rope-end-handle {
@@ -633,6 +691,25 @@
         cursor: grab;
         pointer-events: none;
         r: calc(var(--end-handle-r, 24px));
+      }
+
+      .rope-end-handle.is-pencil-hint {
+        fill: rgba(34, 197, 94, 0.38);
+        stroke: #16a34a;
+        stroke-width: 2.5;
+        animation: rope-end-pulse 1.6s ease-in-out infinite;
+      }
+
+      @keyframes rope-end-pulse {
+        0%,
+        100% {
+          fill: rgba(34, 197, 94, 0.28);
+          stroke-opacity: 0.85;
+        }
+        50% {
+          fill: rgba(34, 197, 94, 0.5);
+          stroke-opacity: 1;
+        }
       }
 
       .rope-end-handle.is-dragging {
@@ -804,6 +881,14 @@
             </button>
             <button
               type="button"
+              id="tool-freehand"
+              class="action-btn"
+              aria-pressed="false"
+            >
+              Tužka
+            </button>
+            <button
+              type="button"
               id="toggle-forces"
               class="action-btn"
               aria-pressed="false"
@@ -968,6 +1053,20 @@
       <div class="workspace">
         <div id="stage" aria-label="Plocha s kladkami">
           <svg id="rope-layer" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+        </div>
+        <div
+          id="freehand-confirm"
+          class="freehand-confirm"
+          hidden
+          role="group"
+          aria-label="Potvrzení lana z tužky"
+        >
+          <button type="button" id="freehand-confirm-ok" class="action-btn action-btn--ok">
+            Potvrdit
+          </button>
+          <button type="button" id="freehand-confirm-cancel" class="action-btn">
+            Zrušit
+          </button>
         </div>
         <div
           id="winch-overload-msg"
