@@ -122,6 +122,10 @@
   const WINCH_REEL_SPEED = 90;
   /** Hmotnost modré kladky — zanedbatelná. */
   const PULLEY_MASS = 0;
+  /** Numerická pojistka na rychlost tělesa (px/s). */
+  const MAX_BODY_SPEED = 4000;
+  /** Pod touto tolerancí (px) je lano považované za napnuté. */
+  const ROPE_SLACK_TOL = 1.5;
   const SETTLE_MS = 100;
   let running = false;
   let runBlocked = false;
@@ -130,8 +134,7 @@
   let physicsFrame = null;
   let lastPhysicsTime = 0;
   let forceLayer = null;
-  const FORCE_ARROW_MIN = 40;
-  const FORCE_ARROW_MAX = 300;
+  const FORCE_ARROW_MAX = 900;
   const FORCE_ARROW_UNIT_LEN = 110;
   /** @type {boolean} */
   let showForces = false;
@@ -1058,13 +1061,24 @@
     return false;
   }
 
+  /** Konec lana je uvázaný ke středu (ose) volné kladky. */
+  function isRopeEndOnFreePulleyCenter(rope, which) {
+    ensureRopeEdgeSnap(rope);
+    const snap = rope.edgeSnap[which];
+    if (!isPulleyCenterSnap(snap) || !snap.pulleyId) return false;
+    const pulley = findPulleyById(snap.pulleyId);
+    return !!(pulley && pulley.kind === "free" && !isDocked(pulley.el));
+  }
+
   /**
-   * Konec může nést tah: okraj stage, naviják, závaží, nebo střed pevné kladky.
+   * Konec může nést tah: okraj stage, naviják, závaží, střed pevné kladky
+   * nebo osa volné kladky (ta je taky těleso s tíhou).
    * Volný konec (jen úchop) tah neudrží — napětí v laně je pak 0.
    */
   function ropeEndResistsTension(rope, which) {
     if (weightOnRopeEnd(rope, which)) return true;
     if (winchOnRopeEnd(rope, which)) return true;
+    if (isRopeEndOnFreePulleyCenter(rope, which)) return true;
     return isRopeEndAnchored(rope, which);
   }
 
@@ -1088,27 +1102,6 @@
       rope,
       side === "enter" ? "start" : "end"
     );
-  }
-
-  function freePulleySupportingStrandCount(rope, attach) {
-    const enter = attach?.freeEnterU;
-    const leave = attach?.freeLeaveU;
-    let n = 0;
-    if (
-      enter &&
-      Math.hypot(enter.x, enter.y) > 0.15 &&
-      strandResistsTension(rope, "enter")
-    ) {
-      n += 1;
-    }
-    if (
-      leave &&
-      Math.hypot(leave.x, leave.y) > 0.15 &&
-      strandResistsTension(rope, "leave")
-    ) {
-      n += 1;
-    }
-    return n;
   }
 
   /** Synchronizuj body lana s háčky závaží přichycených ke koncům. */
@@ -3670,6 +3663,8 @@
   function ropeEndIsFixed(rope, which) {
     if (winchOnRopeEnd(rope, which)) return true;
     if (weightOnRopeEnd(rope, which)) return false;
+    // Konec na ose volné kladky řídí těleso kladky, ne zkracování lana
+    if (isRopeEndOnFreePulleyCenter(rope, which)) return true;
     return isRopeEndAnchored(rope, which);
   }
 
@@ -3687,8 +3682,9 @@
   }
 
   /**
-   * Když jsou oba konce lana pevné (naviják / okraj), enforceRopeLength
-   * nemůže nic zkrátit — musí se posunout volná kladka po gradientu délky.
+   * Když jsou oba konce lana pevné (naviják / okraj / osa volné kladky),
+   * enforceRopeLength nemůže nic zkrátit — přebytek délky rozdělí mezi volné
+   * kladky podle jejich vlastních gradientů délky (nejmenší nutný posun).
    */
   function enforceRopeLengthViaFreePulley(
     model,
@@ -3700,35 +3696,40 @@
   ) {
     const movables = getRopeMovableFreePulleys(rope, model);
     if (!movables.length) return;
-    const leadPulley = freePulley && movables.includes(freePulley)
-      ? freePulley
-      : movables[0];
-    const el = leadPulley.el;
-    const eps = 1.5;
+
     for (let i = 0; i < 10; i += 1) {
-      const pts0 = endpointsWithPulleyCenters(rope, startPt, endPt, leadPulley);
-      const L = measureModelLength(model, pts0.start, pts0.end);
+      const pts = endpointsWithPulleyCenters(rope, startPt, endPt, movables[0]);
+      const L = measureModelLength(model, pts.start, pts.end);
       if (L <= restLength + 0.5) break;
       const excess = L - restLength;
-      const left0 = parseFloat(el.style.left) || 0;
-      const top0 = parseFloat(el.style.top) || 0;
-      el.style.left = `${left0 + eps}px`;
-      const ptsX = endpointsWithPulleyCenters(rope, startPt, endPt, leadPulley);
-      const dLx = (measureModelLength(model, ptsX.start, ptsX.end) - L) / eps;
-      el.style.left = `${left0}px`;
-      el.style.top = `${top0 + eps}px`;
-      const ptsY = endpointsWithPulleyCenters(rope, startPt, endPt, leadPulley);
-      const dLy = (measureModelLength(model, ptsY.start, ptsY.end) - L) / eps;
-      el.style.top = `${top0}px`;
-      const g2 = dLx * dLx + dLy * dLy;
-      if (g2 < 1e-8) break;
-      nudgeRopeMovableFreePulleys(
-        rope,
-        model,
-        dLx * (-excess / g2),
-        dLy * (-excess / g2)
+
+      const grads = movables.map((pulley) =>
+        pulleyLengthGradient(model, startPt, endPt, pulley, rope)
       );
+      let g2 = 0;
+      for (const g of grads) g2 += g.x * g.x + g.y * g.y;
+      if (g2 < 1e-8) break;
+
+      const lambda = excess / g2;
+      for (let k = 0; k < movables.length; k += 1) {
+        setFreePulleyPositionDelta(
+          movables[k],
+          -lambda * grads[k].x,
+          -lambda * grads[k].y
+        );
+        syncRodWeightForPulley(movables[k], null);
+      }
+      rebuildAllRopes();
     }
+  }
+
+  /** Gradient délky lana podle polohy jedné volné kladky. */
+  function pulleyLengthGradient(model, startPt, endPt, pulley, rope) {
+    return numericalLengthGradient(model, startPt, endPt, {
+      pulleyFree: true,
+      pulleyEl: pulley.el,
+      rope,
+    }).pulley;
   }
 
   function initRopeSimulation() {
@@ -4100,13 +4101,13 @@
    * je konec lana přimknutý k ose.
    */
   function freePulleyRopeForceUnit(attach, rope, freePulley) {
-    const wrapFx = -attach.freeEnterU.x + attach.freeLeaveU.x;
-    const wrapFy = -attach.freeEnterU.y + attach.freeLeaveU.y;
-    if (Math.hypot(wrapFx, wrapFy) > 1e-8) {
-      return { x: wrapFx, y: wrapFy };
-    }
     let fx = 0;
     let fy = 0;
+    // Každé obepnutí přidá dvě ramena — kladka může být obepnutá i víckrát
+    for (const contact of freePulleyContacts(attach, freePulley)) {
+      fx += contact.enterPull.x + contact.leavePull.x;
+      fy += contact.enterPull.y + contact.leavePull.y;
+    }
     if (endpointIfPulleyCenter(rope, "start", freePulley)) {
       fx += attach.startU.x;
       fy += attach.startU.y;
@@ -4118,25 +4119,31 @@
     return { x: fx, y: fy };
   }
 
-  /** Počet závaží zavěšených pod daným (včetně něj) — hang řetězec. */
-  function countHangingWeights(root) {
+  /** Všechny dotyky lana s danou volnou kladkou. */
+  function freePulleyContacts(attach, freePulley) {
+    if (!freePulley || !attach?.contacts?.length) return [];
+    return attach.contacts.filter(
+      (c) => c.wheelKind === "free" && c.wheelId === freePulley.id
+    );
+  }
+
+  /**
+   * Počet závaží nesených daným závažím (včetně něj). Zavěšená i postavená
+   * vedle se pohybují s ním, takže zatěžují stejné lano.
+   */
+  function countAttachedWeights(root) {
     if (!root?.el?.isConnected) return 0;
     let count = 1;
     for (const w of weights) {
-      if (
-        w !== root &&
-        w.snap.type === "weight" &&
-        w.snap.weight === root &&
-        w.snap.placement === "hang"
-      ) {
-        count += countHangingWeights(w);
+      if (w !== root && w.snap.type === "weight" && w.snap.weight === root) {
+        count += countAttachedWeights(w);
       }
     }
     return count;
   }
 
   function massOfWeightStack(weight) {
-    return countHangingWeights(weight) * WEIGHT_MASS;
+    return countAttachedWeights(weight) * WEIGHT_MASS;
   }
 
   function setFreePulleyPositionDelta(pulley, dx, dy) {
@@ -4195,52 +4202,30 @@
     return result;
   }
 
-  /** Volná kladka, na jejíž střed je přimknut konec lana — kotva, ne pohyblivý blok. */
-  function isFreePulleyRopeAnchor(pulley, rope) {
+  /**
+   * Volné kladky nesené lanem — obepnuté i ty, ke kterým je lano uvázané
+   * za osu (pohyblivý blok kladkostroje).
+   */
+  function getRopeMovableFreePulleys(rope, model) {
+    const list = getRopeFreePulleys(rope, model);
+    const seen = new Set(list.map((p) => p.id));
     ensureRopeEdgeSnap(rope);
     for (const which of ["start", "end"]) {
       const snap = rope.edgeSnap[which];
-      if (isPulleyCenterSnap(snap) && snap.pulleyId === pulley.id) return true;
+      if (!isPulleyCenterSnap(snap) || !snap.pulleyId) continue;
+      if (seen.has(snap.pulleyId)) continue;
+      const pulley = findPulleyById(snap.pulleyId);
+      if (!pulley || pulley.kind !== "free" || isDocked(pulley.el)) continue;
+      seen.add(pulley.id);
+      list.push(pulley);
     }
-    return false;
-  }
-
-  /** Volné kladky na laně, které se mají pohybovat společně (bez kotvených konců). */
-  function getRopeMovableFreePulleys(rope, model) {
-    return getRopeFreePulleys(rope, model).filter(
-      (p) => !isFreePulleyRopeAnchor(p, rope)
-    );
-  }
-
-  function moveRopeMovableFreePulleys(rope, model, dx, dy, vel) {
-    const movables = getRopeMovableFreePulleys(rope, model);
-    if (!movables.length) return;
-    for (const pulley of movables) {
-      if (vel) {
-        pulley.vel.x = vel.x;
-        pulley.vel.y = vel.y;
-      }
-      setFreePulleyPositionDelta(pulley, dx, dy);
-      syncRodWeightForPulley(pulley, vel);
-    }
-    rebuildAllRopes();
-  }
-
-  function nudgeRopeMovableFreePulleys(rope, model, dx, dy) {
-    moveRopeMovableFreePulleys(rope, model, dx, dy, null);
-  }
-
-  function movableFreePulleysMass(pulleys) {
-    let total = 0;
-    for (const pulley of pulleys) {
-      total += freePulleyMass(pulley.el);
-    }
-    return total;
+    return list;
   }
 
   function freePulleyMass(pulleyEl) {
+    if (!pulleyEl) return PULLEY_MASS;
     const rodW = weights.find(
-      (w) => w.snap.type === "rod" && (!pulleyEl || w.snap.pulley === pulleyEl)
+      (w) => w.snap.type === "rod" && w.snap.pulley === pulleyEl
     );
     if (!rodW) return PULLEY_MASS;
     return PULLEY_MASS + massOfWeightStack(rodW);
@@ -4263,191 +4248,213 @@
   }
 
   /**
-   * Napětí v laně T a zrychlení volných těles z podmínky konstantní délky lana.
-   * Závaží = hmotné body. Modrá kladka má zanedbatelnou hmotnost (+ všechna závaží na tyči).
+   * Podmínka konstantní délky pro jedno lano: pro každé volné těleso (závaží
+   * na konci, pohyblivá kladka) gradient délky a jednotkový tah lana.
+   * Napětí se pak řeší pro všechna lana najednou — jedna kladka může viset
+   * na víc lanech.
    */
-  function computeRopeDynamics(rope, model, startPt, endPt) {
+  function buildRopeConstraint(rope, model, startPt, endPt, bodies) {
+    const attach = getRopeAttachmentVectors(model, startPt, endPt);
     const startW = weightOnRopeEnd(rope, "start");
     const endW = weightOnRopeEnd(rope, "end");
-    const startWinch = winchOnRopeEnd(rope, "start");
-    const endWinch = winchOnRopeEnd(rope, "end");
-    const hasAnchor = ropeCanCarryTension(rope, model);
-    const movableFreePulleys = getRopeMovableFreePulleys(rope, model);
-    const freePulley = movableFreePulleys[0] || getRopeFreePulley(rope, model);
-    const hasFree = movableFreePulleys.length > 0 || ropeWrapsFreeWheel(rope);
-    const pulleyEl = freePulley?.el || null;
-    const rodW = weights.find(
-      (w) => w.snap.type === "rod" && (!pulleyEl || w.snap.pulley === pulleyEl)
-    );
     const startMass = startW ? massOfWeightStack(startW) : 0;
     const endMass = endW ? massOfWeightStack(endW) : 0;
-    const pulleyMass = movableFreePulleys.length
-      ? movableFreePulleysMass(movableFreePulleys)
-      : freePulleyMass(pulleyEl);
-
-    const attach = getRopeAttachmentVectors(model, startPt, endPt);
-    const pulleyU = freePulleyRopeForceUnit(attach, rope, freePulley);
-    const grad = numericalLengthGradient(model, startPt, endPt, {
+    const endGrad = numericalLengthGradient(model, startPt, endPt, {
       startFree: !!startW,
       endFree: !!endW,
-      pulleyFree: hasFree && pulleyMass > 1e-8,
-      pulleyEl,
+      pulleyFree: false,
       rope,
     });
 
-    let numerator = 0;
-    let denominator = 0;
-
-    if (startW && startMass > 1e-8) {
-      const Fg = { x: 0, y: startMass * GRAVITY };
-      numerator += vecDot(grad.start, Fg) / startMass;
-      denominator += vecDot(grad.start, attach.startU) / startMass;
-    }
-    if (endW && endMass > 1e-8) {
-      const Fg = { x: 0, y: endMass * GRAVITY };
-      numerator += vecDot(grad.end, Fg) / endMass;
-      denominator += vecDot(grad.end, attach.endU) / endMass;
-    }
-    if (hasFree && pulleyMass > 1e-8) {
-      const Fg = { x: 0, y: pulleyMass * GRAVITY };
-      numerator += vecDot(grad.pulley, Fg) / pulleyMass;
-      denominator += vecDot(grad.pulley, pulleyU) / pulleyMass;
-    }
-
-    let tension = 0;
-    if (hasAnchor && Math.abs(denominator) > 1e-8) {
-      tension = -numerator / denominator;
-      if (tension < 0) tension = 0;
-    }
-    if (hasAnchor && tension < 1e-6) {
-      const eqT = displayEquilibriumTension(rope, {
-        attach,
-        startMass,
-        endMass,
-      });
-      if (eqT > tension) tension = eqT;
-    }
-
-    const accel = {
-      start: { x: 0, y: 0 },
-      end: { x: 0, y: 0 },
-      pulley: { x: 0, y: 0 },
-    };
-    const netForce = {
-      start: { x: 0, y: 0 },
-      end: { x: 0, y: 0 },
-      pulley: { x: 0, y: 0 },
-    };
-
-    if (startW && startMass > 1e-8) {
-      netForce.start = {
-        x: tension * attach.startU.x,
-        y: startMass * GRAVITY + tension * attach.startU.y,
-      };
-      accel.start = {
-        x: netForce.start.x / startMass,
-        y: netForce.start.y / startMass,
-      };
-    }
-    if (endW && endMass > 1e-8) {
-      netForce.end = {
-        x: tension * attach.endU.x,
-        y: endMass * GRAVITY + tension * attach.endU.y,
-      };
-      accel.end = {
-        x: netForce.end.x / endMass,
-        y: netForce.end.y / endMass,
-      };
-    }
-    if (hasFree) {
-      netForce.pulley = {
-        x: tension * pulleyU.x,
-        y: pulleyMass * GRAVITY + tension * pulleyU.y,
-      };
-      if (pulleyMass > 1e-8) {
-        accel.pulley = {
-          x: netForce.pulley.x / pulleyMass,
-          y: netForce.pulley.y / pulleyMass,
-        };
+    const terms = [];
+    const termByObj = new Map();
+    const addTerm = (term) => {
+      terms.push(term);
+      termByObj.set(term.obj, term);
+      if (bodies && !bodies.has(term.obj)) {
+        bodies.set(term.obj, {
+          kind: term.kind,
+          obj: term.obj,
+          mass: term.mass,
+          force: { x: 0, y: 0 },
+          accel: { x: 0, y: 0 },
+        });
       }
+    };
+
+    if (startW && startMass > 1e-8) {
+      addTerm({
+        kind: "weight",
+        obj: startW,
+        which: "start",
+        mass: startMass,
+        grad: endGrad.start,
+        u: attach.startU,
+      });
     }
+    if (endW && endMass > 1e-8) {
+      addTerm({
+        kind: "weight",
+        obj: endW,
+        which: "end",
+        mass: endMass,
+        grad: endGrad.end,
+        u: attach.endU,
+      });
+    }
+
+    const freePulleys = getRopeMovableFreePulleys(rope, model);
+    for (const pulley of freePulleys) {
+      const mass = freePulleyMass(pulley.el);
+      if (mass <= 1e-8) continue;
+      addTerm({
+        kind: "pulley",
+        obj: pulley,
+        mass,
+        grad: pulleyLengthGradient(model, startPt, endPt, pulley, rope),
+        u: freePulleyRopeForceUnit(attach, rope, pulley),
+        contacts: freePulleyContacts(attach, pulley),
+      });
+    }
+
+    const length = measureModelLength(model, startPt, endPt);
+    const restLength = rope.sim?.restLength;
+    // Prověšené lano netáhne — napětí drží jen napnuté lano
+    const slack = restLength != null && length < restLength - ROPE_SLACK_TOL;
 
     return {
-      tension,
-      accel,
-      netForce,
+      rope,
+      model,
+      startPt,
+      endPt,
       attach,
-      pulleyMass,
-      pulleyU,
-      rodW,
-      startMass,
-      endMass,
-      freePulley,
+      terms,
+      termByObj,
+      freePulleys,
+      length,
+      slack,
+      canCarry: ropeCanCarryTension(rope, model),
+      tension: 0,
     };
   }
 
   /**
-   * Statické napětí pro zobrazení šipek, když dynamický výpočet dá T≈0
-   * (např. dvě stejná závaží v rovnováze nad pevnou kladkou).
-   * Jen když oba konce drží — jinak fyzikální T zůstane 0.
+   * Napětí ve všech lanech současně: A·T = b s podmínkou T ≥ 0 (lano jen táhne).
+   * A_kl = Σ_i (∇_i L_k · u_l,i)/m_i, b_k = −Σ_i (∇_i L_k · Fg_i)/m_i.
+   * Řešeno projekční Gauss–Seidelovou iterací.
    */
-  function displayEquilibriumTension(rope, dyn) {
-    if (!ropeCanCarryTension(rope)) return 0;
-    const candidates = [];
-    const startW = weightOnRopeEnd(rope, "start");
-    const endW = weightOnRopeEnd(rope, "end");
-    if (startW && dyn.startMass > 1e-8) {
-      const uy = dyn.attach.startU.y;
-      if (uy < -0.05) candidates.push((dyn.startMass * GRAVITY) / -uy);
+  function solveRopeTensions(constraints) {
+    const active = [];
+    for (const c of constraints) {
+      c.tension = 0;
+      if (c.canCarry && !c.slack && c.terms.length) active.push(c);
     }
-    if (endW && dyn.endMass > 1e-8) {
-      const uy = dyn.attach.endU.y;
-      if (uy < -0.05) candidates.push((dyn.endMass * GRAVITY) / -uy);
-    }
-    if (dyn.pulleyMass > 1e-8) {
-      const strands = freePulleySupportingStrandCount(rope, dyn.attach);
-      if (strands >= 1) {
-        candidates.push((dyn.pulleyMass * GRAVITY) / 2);
+    if (!active.length) return;
+
+    const n = active.length;
+    const A = [];
+    const b = [];
+    for (let k = 0; k < n; k += 1) {
+      const row = new Array(n).fill(0);
+      let rhs = 0;
+      for (const term of active[k].terms) {
+        rhs -= vecDot(term.grad, { x: 0, y: term.mass * GRAVITY }) / term.mass;
+        for (let l = 0; l < n; l += 1) {
+          const other = active[l].termByObj.get(term.obj);
+          if (!other) continue;
+          row[l] += vecDot(term.grad, other.u) / term.mass;
+        }
       }
+      A.push(row);
+      b.push(rhs);
     }
-    if (!candidates.length) return 0;
-    return candidates.reduce((a, b) => a + b, 0) / candidates.length;
+
+    const T = new Array(n).fill(0);
+    for (let iter = 0; iter < 60; iter += 1) {
+      let delta = 0;
+      for (let k = 0; k < n; k += 1) {
+        if (Math.abs(A[k][k]) < 1e-9) {
+          T[k] = 0;
+          continue;
+        }
+        let sum = b[k];
+        for (let l = 0; l < n; l += 1) {
+          if (l !== k) sum -= A[k][l] * T[l];
+        }
+        const next = Math.max(0, sum / A[k][k]);
+        delta = Math.max(delta, Math.abs(next - T[k]));
+        T[k] = next;
+      }
+      if (delta < 1e-6) break;
+    }
+
+    for (let k = 0; k < n; k += 1) active[k].tension = T[k];
+  }
+
+  /** Všechna lana, tělesa, napětí a výsledné síly pro aktuální geometrii. */
+  function buildRopeSystem() {
+    const bodies = new Map();
+    const constraints = [];
+    for (const rope of ropes) {
+      const state = getRopeForceState(rope);
+      if (!state) continue;
+      constraints.push(
+        buildRopeConstraint(rope, state.model, state.startPt, state.endPt, bodies)
+      );
+    }
+    solveRopeTensions(constraints);
+
+    for (const c of constraints) {
+      if (c.rope.sim) c.rope.sim.tension = c.tension;
+    }
+
+    // Tíha se každému tělesu započítá jednou, tahy sečte přes všechna lana
+    for (const body of bodies.values()) {
+      let fx = 0;
+      let fy = body.mass * GRAVITY;
+      for (const c of constraints) {
+        if (c.tension <= 0) continue;
+        const term = c.termByObj.get(body.obj);
+        if (!term) continue;
+        fx += c.tension * term.u.x;
+        fy += c.tension * term.u.y;
+      }
+      body.force = { x: fx, y: fy };
+      body.accel = { x: fx / body.mass, y: fy / body.mass };
+    }
+
+    return { bodies, constraints };
+  }
+
+  function constraintForRope(system, rope) {
+    return system?.constraints.find((c) => c.rope === rope) || null;
   }
 
   /**
-   * Napětí pro šipky u volné kladky.
-   * Ideální volná kladka: T = Fg/2 na každém rameni.
-   * Rameno k volnému konci tah neukazujeme; závěsné rameno má pořád T = Fg/2
-   * → výslednice Fg/2 dolů.
+   * Rovnovážný tah pro zobrazení, když lano nemůže nést napětí (volný konec).
+   * Ideální volná kladka: obě ramena by nesla T = Fg/(cos θ₁ + cos θ₂);
+   * rameno k volnému konci se nekreslí, takže zbude výslednice směrem dolů.
    */
-  function tensionForFreePulleyDisplay(rope, dyn, globalT) {
-    const strands = freePulleySupportingStrandCount(rope, dyn.attach);
-    if (strands < 1 || dyn.pulleyMass < 1e-8) return 0;
+  function freePulleyDisplayTension(term) {
+    const gy = term.mass * GRAVITY;
+    if (!(gy > 1e-8)) return 0;
+    let up = 0;
+    for (const contact of term.contacts || []) {
+      up += Math.max(0, -contact.enterPull.y);
+      up += Math.max(0, -contact.leavePull.y);
+    }
+    if (up < 0.05) return 0;
+    return gy / up;
+  }
 
-    // Vždy polovina tíhy (dvě ramena volné kladky), ne Fg / počet držících
-    const eqT = (dyn.pulleyMass * GRAVITY) / 2;
-    if (globalT < 1e-6) return eqT;
-
-    const enter = dyn.attach?.freeEnterU;
-    const leave = dyn.attach?.freeLeaveU;
-    const useEnter =
-      enter &&
-      Math.hypot(enter.x, enter.y) > 0.15 &&
-      strandResistsTension(rope, "enter");
-    const useLeave =
-      leave &&
-      Math.hypot(leave.x, leave.y) > 0.15 &&
-      strandResistsTension(rope, "leave");
-    const gx = 0;
-    const gy = dyn.pulleyMass * GRAVITY;
-    const t1x = useEnter ? globalT * -enter.x : 0;
-    const t1y = useEnter ? globalT * -enter.y : 0;
-    const t2x = useLeave ? globalT * leave.x : 0;
-    const t2y = useLeave ? globalT * leave.y : 0;
-    const nx = gx + t1x + t2x;
-    const ny = gy + t1y + t2y;
-    if (Math.hypot(nx, ny) <= gy * 0.12) return eqT;
-    return globalT;
+  /** Tah pro šipky u pevných kladek a kotev, když spočítané napětí je nulové. */
+  function fallbackDisplayTension(c) {
+    let best = 0;
+    for (const term of c.terms) {
+      if (term.kind !== "pulley") continue;
+      best = Math.max(best, freePulleyDisplayTension(term));
+    }
+    return best;
   }
 
   /** Stav lana pro výpočet sil — i mimo simulaci. */
@@ -4503,57 +4510,28 @@
     if (forceLayer) forceLayer.replaceChildren();
   }
 
-  function scaleForceArrow(fx, fy, kind) {
+  /** Délka šipky je přímo úměrná velikosti síly (110 px na tíhu jednoho závaží). */
+  function scaleForceArrow(fx, fy) {
     const mag = Math.hypot(fx, fy);
     if (mag < 1e-6) return null;
-    // Délka podle násobku tíhy jednoho závaží — stack 2×/3× se vizuálně prodlouží
     const unit = WEIGHT_MASS * GRAVITY;
-    const minLen = kind === "net" ? 0 : FORCE_ARROW_MIN;
-    const len = clamp(
-      (mag / unit) * FORCE_ARROW_UNIT_LEN,
-      minLen,
-      FORCE_ARROW_MAX
-    );
+    const len = Math.min((mag / unit) * FORCE_ARROW_UNIT_LEN, FORCE_ARROW_MAX);
+    if (len < 1) return null;
     return {
       x: (fx / mag) * len,
       y: (fy / mag) * len,
+      len,
       mag,
     };
   }
 
-  function shouldDrawNetForce(nx, ny, refMag) {
-    if (refMag < 1e-6) return false;
-    return Math.hypot(nx, ny) > refMag * 0.06;
-  }
-
-  /** Tah pro zobrazení u konkrétního závaží — v rovnováze vyváží tíhu podél lana. */
-  function tensionForWeightDisplay(mass, attachU, globalT) {
-    const gy = mass * GRAVITY;
-    const nx = globalT * attachU.x;
-    const ny = gy + globalT * attachU.y;
-    if (Math.hypot(nx, ny) > gy * 0.08) return globalT;
-    const uy = attachU.y;
-    if (uy >= -0.05) return globalT;
-    return gy / -uy;
-  }
-
-  function drawWeightForceTriad(origin, mass, attachU, globalT) {
-    const gx = 0;
-    const gy = mass * GRAVITY;
-    const T = tensionForWeightDisplay(mass, attachU, globalT);
-    const tx = T * attachU.x;
-    const ty = T * attachU.y;
-    const nx = gx + tx;
-    const ny = gy + ty;
-    drawForceArrow(origin, gx, gy, "gravity");
-    drawTensionArrow(origin, tx, ty);
-    if (shouldDrawNetForce(nx, ny, gy)) {
-      drawForceArrow(origin, nx, ny, "net");
-    }
+  /** Kreslit výslednici, jen když není nulová (jinak by to byl šum). */
+  function shouldDrawNetForce(nx, ny) {
+    return Math.hypot(nx, ny) > WEIGHT_FORCE * 0.002;
   }
 
   function drawForceArrow(origin, fx, fy, kind) {
-    const scaled = scaleForceArrow(fx, fy, kind);
+    const scaled = scaleForceArrow(fx, fy);
     if (!scaled) return;
     const layer = ensureForceLayer();
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -4562,7 +4540,7 @@
     const x2 = origin.x + scaled.x;
     const y2 = origin.y + scaled.y;
     const ang = Math.atan2(scaled.y, scaled.x);
-    const head = 14;
+    const head = clamp(scaled.len * 0.3, 5, 14);
     const hx1 = x2 - head * Math.cos(ang - 0.42);
     const hy1 = y2 - head * Math.sin(ang - 0.42);
     const hx2 = x2 - head * Math.cos(ang + 0.42);
@@ -4587,9 +4565,8 @@
     layer.appendChild(g);
   }
 
-  /** Tažná síla — nevykresluj šipky ve směru tíhy (dolů). */
+  /** Tažná síla lana — ve skutečném směru, i když míří dolů. */
   function drawTensionArrow(origin, fx, fy) {
-    if (fy > 1e-6) return;
     drawForceArrow(origin, fx, fy, "tension");
   }
 
@@ -4632,39 +4609,27 @@
     return label;
   }
 
-  function updateWinchForceLabels() {
+  /** Štítek navijáku ukazuje skutečné napětí v laně, i když přesáhne 150 N. */
+  function updateWinchForceLabels(system) {
     for (const winch of winches) {
       const label = ensureWinchForceLabel(winch);
       if (!label) continue;
+      const constraint =
+        winch.snap?.type === "rope"
+          ? constraintForRope(system, winch.snap.rope)
+          : null;
       if (
         !running ||
         isDocked(winch.el) ||
         isStockTemplate(winch.el) ||
-        winch.snap?.type !== "rope"
+        !constraint
       ) {
         label.textContent = "";
         label.style.visibility = "hidden";
         continue;
       }
 
-      const rope = winch.snap.rope;
-      const state = getRopeForceState(rope);
-      if (!state) {
-        label.textContent = "";
-        label.style.visibility = "hidden";
-        continue;
-      }
-
-      const dyn = computeRopeDynamics(
-        rope,
-        state.model,
-        state.startPt,
-        state.endPt
-      );
-      const pullN = Math.min(
-        simForceToNewtons(dyn.tension),
-        WINCH_MAX_FORCE_N
-      );
+      const pullN = simForceToNewtons(constraint.tension);
       if (pullN < 0.5) {
         label.textContent = "";
         label.style.visibility = "hidden";
@@ -4673,173 +4638,133 @@
 
       label.textContent = `${Math.round(pullN)} N`;
       label.style.visibility = "visible";
-      label.classList.toggle("is-at-max", pullN >= WINCH_MAX_FORCE_N - 0.5);
+      label.classList.toggle(
+        "is-at-max",
+        pullN >= WINCH_MAX_FORCE_N - 0.5 && pullN <= WINCH_MAX_FORCE_N + 0.5
+      );
       label.classList.toggle(
         "is-overloaded",
-        winch.el.classList.contains("is-overload")
+        pullN > WINCH_MAX_FORCE_N + 0.5 ||
+          winch.el.classList.contains("is-overload")
       );
     }
   }
 
   function updateForceArrows() {
     syncForceOverlay();
-    updateWinchForceLabels();
+    const system = buildRopeSystem();
+    updateWinchForceLabels(system);
     clearForceArrows();
     if (!showForces) return;
+    for (const constraint of system.constraints) {
+      drawRopeForces(constraint);
+    }
+  }
 
-    for (const rope of ropes) {
-      const state = getRopeForceState(rope);
-      if (!state) continue;
-      const { model, startPt, endPt } = state;
-      const dyn = computeRopeDynamics(rope, model, startPt, endPt);
-      const T = dyn.tension;
-      const startW = weightOnRopeEnd(rope, "start");
-      const endW = weightOnRopeEnd(rope, "end");
-      const hasFree = !!dyn.freePulley || ropeWrapsFreeWheel(rope);
+  function drawRopeForces(c) {
+    const T = c.tension;
+    for (const term of c.terms) {
+      if (term.kind === "weight") drawWeightForces(term, T);
+      else drawFreePulleyForces(c, term, T);
+    }
+    drawFixedWheelForces(c, T);
+    drawWinchForces(c, T);
+  }
 
-      if (startW) {
-        drawWeightForceTriad(
-          getWeightHookWorld(startW),
-          dyn.startMass,
-          dyn.attach.startU,
-          T
-        );
-      }
+  function drawWeightForces(term, T) {
+    const origin = getWeightHookWorld(term.obj);
+    const gy = term.mass * GRAVITY;
+    const tx = T * term.u.x;
+    const ty = T * term.u.y;
+    drawForceArrow(origin, 0, gy, "gravity");
+    if (T > 1e-6) drawTensionArrow(origin, tx, ty);
+    if (shouldDrawNetForce(tx, gy + ty)) {
+      drawForceArrow(origin, tx, gy + ty, "net");
+    }
+  }
 
-      if (endW) {
-        drawWeightForceTriad(
-          getWeightHookWorld(endW),
-          dyn.endMass,
-          dyn.attach.endU,
-          T
-        );
-      }
+  function drawFreePulleyForces(c, term, T) {
+    const rope = c.rope;
+    const wheel = getWheelWorld(term.obj.el, "free");
+    if (!wheel) return;
+    const origin = { x: wheel.cx, y: wheel.cy };
+    const gy = term.mass * GRAVITY;
+    // Volný konec lana ⇒ T = 0; pro ukázku rovnováhy dopočti ideální tah
+    const Tp = T > 1e-6 ? T : freePulleyDisplayTension(term);
+    let nx = 0;
+    let ny = gy;
+    drawForceArrow(origin, 0, gy, "gravity");
 
-      if (hasFree && dyn.freePulley) {
-        const wheel = getWheelWorld(dyn.freePulley.el, "free");
-        if (!wheel) continue;
-        const origin = { x: wheel.cx, y: wheel.cy };
-        const gx = 0;
-        const gy = dyn.pulleyMass * GRAVITY;
-        const Tp = tensionForFreePulleyDisplay(rope, dyn, T);
-        const enter = dyn.attach.freeEnterU;
-        const leave = dyn.attach.freeLeaveU;
-        const useEnter =
-          Tp > 1e-6 &&
-          enter &&
-          Math.hypot(enter.x, enter.y) > 0.15 &&
-          strandResistsTension(rope, "enter");
-        const useLeave =
-          Tp > 1e-6 &&
-          leave &&
-          Math.hypot(leave.x, leave.y) > 0.15 &&
-          strandResistsTension(rope, "leave");
-        const t1x = useEnter ? Tp * -enter.x : 0;
-        const t1y = useEnter ? Tp * -enter.y : 0;
-        const t2x = useLeave ? Tp * leave.x : 0;
-        const t2y = useLeave ? Tp * leave.y : 0;
-        if (dyn.pulleyMass > 1e-8) {
-          drawForceArrow(origin, gx, gy, "gravity");
-        }
-        // Tah jen na ramenech vedoucích k držícímu konci (ne k volnému)
-        if (useEnter) {
-          drawTensionArrow(
-            dyn.attach.freeEnterPt || origin,
-            t1x,
-            t1y
-          );
-        }
-        if (useLeave) {
-          drawTensionArrow(
-            dyn.attach.freeLeavePt || origin,
-            t2x,
-            t2y
-          );
-        }
-        // Součet sil ze středu volné kladky
-        drawForceArrow(
-          origin,
-          gx + t1x + t2x,
-          gy + t1y + t2y,
-          "net"
-        );
-      }
-
-      // Tah u pevného závěsu (střed pevné kladky)
-      {
-        const Tanchor =
-          T > 1e-6
-            ? T
-            : hasFree && dyn.pulleyMass > 1e-8
-              ? tensionForFreePulleyDisplay(rope, dyn, T)
-              : 0;
-        if (Tanchor > 1e-6) {
-          for (const which of ["start", "end"]) {
-            if (!ropeEndResistsTension(rope, which)) continue;
-            ensureRopeEdgeSnap(rope);
-            const snap = rope.edgeSnap[which];
-            if (!isPulleyCenterSnap(snap)) continue;
-            const pulley = findPulleyById(snap.pulleyId);
-            if (!pulley || pulley.kind !== "fixed") continue;
-            const center = getPulleyCenterWorld(pulley.id);
-            if (!center) continue;
-            const u =
-              which === "start" ? dyn.attach.startU : dyn.attach.endU;
-            drawTensionArrow(
-              { x: center.x, y: center.y },
-              Tanchor * u.x,
-              Tanchor * u.y
-            );
-          }
+    if (Tp > 1e-6) {
+      for (const contact of term.contacts || []) {
+        for (const side of ["enter", "leave"]) {
+          if (!strandResistsTension(rope, side)) continue;
+          const pull = side === "enter" ? contact.enterPull : contact.leavePull;
+          if (Math.hypot(pull.x, pull.y) < 0.15) continue;
+          const at = side === "enter" ? contact.enterPt : contact.leavePt;
+          drawTensionArrow(at, Tp * pull.x, Tp * pull.y);
+          nx += Tp * pull.x;
+          ny += Tp * pull.y;
         }
       }
-
-      // Tažné síly u pevné kladky — jen ramena k držícímu konci
-      {
-        const Twrap =
-          T > 1e-6
-            ? T
-            : hasFree && dyn.pulleyMass > 1e-8
-              ? tensionForFreePulleyDisplay(rope, dyn, T)
-              : 0;
-        if (Twrap > 1e-6 && dyn.attach.contacts) {
-          for (const c of dyn.attach.contacts) {
-            if (c.wheelKind !== "fixed") continue;
-            if (
-              strandResistsTension(rope, "enter") &&
-              Math.hypot(c.enterPull.x, c.enterPull.y) > 0.15
-            ) {
-              drawTensionArrow(
-                c.enterPt,
-                Twrap * c.enterPull.x,
-                Twrap * c.enterPull.y
-              );
-            }
-            if (
-              strandResistsTension(rope, "leave") &&
-              Math.hypot(c.leavePull.x, c.leavePull.y) > 0.15
-            ) {
-              drawTensionArrow(
-                c.leavePt,
-                Twrap * c.leavePull.x,
-                Twrap * c.leavePull.y
-              );
-            }
-          }
-        }
-      }
-
-      // Síla navijáku (max 150 N) — směr do bubnu, velikost min(T, Fmax)
+      // Lano uvázané za osu kladky
       for (const which of ["start", "end"]) {
-        const winch = winchOnRopeEnd(rope, which);
-        if (!winch) continue;
-        const origin = getWinchHookWorld(winch);
-        const u =
-          which === "start" ? dyn.attach.startU : dyn.attach.endU;
-        const f = Math.min(T, WINCH_MAX_FORCE);
-        // Napětí táhne konec směrem u; naviják drží opačně (do bubnu)
-        drawForceArrow(origin, -u.x * f, -u.y * f, "winch");
+        if (!endpointIfPulleyCenter(rope, which, term.obj)) continue;
+        const other = which === "start" ? "end" : "start";
+        if (!ropeEndResistsTension(rope, other)) continue;
+        const u = which === "start" ? c.attach.startU : c.attach.endU;
+        drawTensionArrow(origin, Tp * u.x, Tp * u.y);
+        nx += Tp * u.x;
+        ny += Tp * u.y;
       }
+    }
+
+    if (shouldDrawNetForce(nx, ny)) {
+      drawForceArrow(origin, nx, ny, "net");
+    }
+  }
+
+  /** Tahy lana na pevné kladky — v drážce i v ose, ke které je lano uvázané. */
+  function drawFixedWheelForces(c, T) {
+    const rope = c.rope;
+    const Tshow = T > 1e-6 ? T : fallbackDisplayTension(c);
+    if (Tshow <= 1e-6) return;
+
+    for (const which of ["start", "end"]) {
+      if (!ropeEndResistsTension(rope, which)) continue;
+      ensureRopeEdgeSnap(rope);
+      const snap = rope.edgeSnap[which];
+      if (!isPulleyCenterSnap(snap)) continue;
+      const pulley = findPulleyById(snap.pulleyId);
+      if (!pulley || pulley.kind !== "fixed") continue;
+      const center = getPulleyCenterWorld(pulley.id);
+      if (!center) continue;
+      const u = which === "start" ? c.attach.startU : c.attach.endU;
+      drawTensionArrow({ x: center.x, y: center.y }, Tshow * u.x, Tshow * u.y);
+    }
+
+    for (const contact of c.attach.contacts || []) {
+      if (contact.wheelKind !== "fixed") continue;
+      for (const side of ["enter", "leave"]) {
+        if (!strandResistsTension(rope, side)) continue;
+        const pull = side === "enter" ? contact.enterPull : contact.leavePull;
+        if (Math.hypot(pull.x, pull.y) < 0.15) continue;
+        const at = side === "enter" ? contact.enterPt : contact.leavePt;
+        drawTensionArrow(at, Tshow * pull.x, Tshow * pull.y);
+      }
+    }
+  }
+
+  /** Síla navijáku — skutečné napětí v laně, směr do bubnu. */
+  function drawWinchForces(c, T) {
+    if (T <= 1e-6) return;
+    for (const which of ["start", "end"]) {
+      const winch = winchOnRopeEnd(c.rope, which);
+      if (!winch) continue;
+      const origin = getWinchHookWorld(winch);
+      const u = which === "start" ? c.attach.startU : c.attach.endU;
+      // Napětí táhne konec směrem u; naviják drží opačně (do bubnu)
+      drawForceArrow(origin, -u.x * T, -u.y * T, "winch");
     }
   }
 
@@ -4921,8 +4846,8 @@
   function integrateRopePhysics(rope, dt) {
     if (!rope.sim || rope.closed || !rope.el.isConnected) return;
 
-    const { model, restLength } = rope.sim;
-    const { height, width } = stageSize();
+    const { model } = rope.sim;
+    const { width } = stageSize();
 
     let startPt = { ...rope.sim.startPt };
     let endPt = { ...rope.sim.endPt };
@@ -4931,46 +4856,15 @@
     const endW = weightOnRopeEnd(rope, "end");
     const startWinch = winchOnRopeEnd(rope, "start");
     const endWinch = winchOnRopeEnd(rope, "end");
-    const freePulley = getRopeFreePulley(rope, model);
     const movableFreePulleys = getRopeMovableFreePulleys(rope, model);
+    const freePulley = movableFreePulleys[0] || getRopeFreePulley(rope, model);
     const hasFree = movableFreePulleys.length > 0;
-    const pulleyEl = freePulley?.el || null;
-    const rodW = weights.find(
-      (w) => w.snap.type === "rod" && (!pulleyEl || w.snap.pulley === pulleyEl)
-    );
 
     if (startWinch) startPt = getWinchHookWorld(startWinch);
     if (endWinch) endPt = getWinchHookWorld(endWinch);
 
-    const { tension, accel } = computeRopeDynamics(
-      rope,
-      rope.sim.model,
-      startPt,
-      endPt
-    );
-    rope.sim.tension = tension;
-
-    // Navíjení: zkracuj lano, dokud napětí nepřekročí max. sílu navijáku (150 N).
-    const activeWinch = startWinch || endWinch;
-    if (activeWinch) {
-      const canReel = tension < WINCH_MAX_FORCE - 1e-6;
-      setWinchWinding(activeWinch, canReel ? "winding" : "overload");
-      if (canReel) {
-        const minLen = 40;
-        rope.sim.restLength = Math.max(
-          minLen,
-          rope.sim.restLength - WINCH_REEL_SPEED * dt
-        );
-      }
-    } else {
-      if (startWinch) setWinchWinding(startWinch, false);
-      if (endWinch) setWinchWinding(endWinch, false);
-    }
-
-    // Bez setrvačnosti: rychlost = aktuální zrychlení ze sil (neakumuluje se)
+    // Rychlosti už jsou integrované ze sil (integrateBodyVelocities)
     if (startW) {
-      startW.vel.x = accel.start.x;
-      startW.vel.y = accel.start.y;
       startPt.x += startW.vel.x * dt;
       startPt.y += startW.vel.y * dt;
     } else if (startWinch) {
@@ -4980,8 +4874,6 @@
     }
 
     if (endW) {
-      endW.vel.x = accel.end.x;
-      endW.vel.y = accel.end.y;
       endPt.x += endW.vel.x * dt;
       endPt.y += endW.vel.y * dt;
     } else if (endWinch) {
@@ -4992,31 +4884,18 @@
 
     const offS = startW ? getWeightHookOffset(startW) : { x: 0, y: 0 };
     const offE = endW ? getWeightHookOffset(endW) : { x: 0, y: 0 };
-    startPt.x = clamp(
-      startPt.x,
-      offS.x,
-      width - (startW?.el.offsetWidth || 70) + offS.x
-    );
-    endPt.x = clamp(
-      endPt.x,
-      offE.x,
-      width - (endW?.el.offsetWidth || 70) + offE.x
-    );
-
-    if (hasFree && freePulley) {
-      moveRopeMovableFreePulleys(
-        rope,
-        model,
-        accel.pulley.x * dt,
-        accel.pulley.y * dt,
-        accel.pulley
-      );
-      const maxLeft = Math.max(0, width - (pulleyEl?.offsetWidth || 0));
-      for (const pulley of movableFreePulleys) {
-        if (parseFloat(pulley.el.style.left) <= 0.5) pulley.vel.x = 0;
-        if (parseFloat(pulley.el.style.left) >= maxLeft - 0.5) pulley.vel.x = 0;
-      }
+    const startMinX = offS.x;
+    const startMaxX = width - (startW?.el.offsetWidth || 70) + offS.x;
+    const endMinX = offE.x;
+    const endMaxX = width - (endW?.el.offsetWidth || 70) + offE.x;
+    if (startW && (startPt.x <= startMinX || startPt.x >= startMaxX)) {
+      startW.vel.x = 0;
     }
+    if (endW && (endPt.x <= endMinX || endPt.x >= endMaxX)) {
+      endW.vel.x = 0;
+    }
+    startPt.x = clamp(startPt.x, startMinX, startMaxX);
+    endPt.x = clamp(endPt.x, endMinX, endMaxX);
 
     // Nejdřív sklouznutí, ať se lano nezkracuje do rozbitého obepnutí
     if (trySlipWrapsAtLooseEnd(rope, startPt, endPt)) {
@@ -5029,8 +4908,8 @@
       endPt,
       rope.sim.restLength,
       {
-        startFixed: !!startWinch || (isRopeEndAnchored(rope, "start") && !startW),
-        endFixed: !!endWinch || (isRopeEndAnchored(rope, "end") && !endW),
+        startFixed: ropeEndIsFixed(rope, "start"),
+        endFixed: ropeEndIsFixed(rope, "end"),
       }
     );
 
@@ -5054,9 +4933,8 @@
         corrected.end,
         rope.sim.restLength,
         {
-          startFixed:
-            !!startWinch || (isRopeEndAnchored(rope, "start") && !startW),
-          endFixed: !!endWinch || (isRopeEndAnchored(rope, "end") && !endW),
+          startFixed: ropeEndIsFixed(rope, "start"),
+          endFixed: ropeEndIsFixed(rope, "end"),
         }
       );
       if (startWinch) corrected.start = getWinchHookWorld(startWinch);
@@ -5095,11 +4973,7 @@
 
     applyRopeSimEndpoints(rope, corrected.start, corrected.end);
 
-    if (rodW && hasFree && freePulley) {
-      syncRodWeightForPulley(freePulley, freePulley.vel);
-    }
     for (const pulley of movableFreePulleys) {
-      if (pulley === freePulley) continue;
       syncRodWeightForPulley(pulley, pulley.vel);
     }
   }
@@ -5108,6 +4982,99 @@
     for (const rope of ropes) {
       integrateRopePhysics(rope, dt);
     }
+  }
+
+  /** Navíjení: zkracuj lano, dokud napětí nepřekročí max. sílu navijáku. */
+  function applyWinchReeling(system, dt) {
+    for (const c of system.constraints) {
+      const rope = c.rope;
+      if (!rope.sim) continue;
+      const startWinch = winchOnRopeEnd(rope, "start");
+      const endWinch = winchOnRopeEnd(rope, "end");
+      const activeWinch = startWinch || endWinch;
+      if (!activeWinch) continue;
+      const canReel = c.tension < WINCH_MAX_FORCE - 1e-6;
+      const state = canReel ? "winding" : "overload";
+      if (startWinch) setWinchWinding(startWinch, state);
+      if (endWinch) setWinchWinding(endWinch, state);
+      if (canReel) {
+        const minLen = 40;
+        rope.sim.restLength = Math.max(
+          minLen,
+          rope.sim.restLength - WINCH_REEL_SPEED * dt
+        );
+      }
+    }
+  }
+
+  /** Setrvačnost: rychlost se integruje ze zrychlení, ne z něj přímo plyne. */
+  function integrateBodyVelocities(system, dt) {
+    for (const body of system.bodies.values()) {
+      const vel = body.obj?.vel;
+      if (!vel) continue;
+      vel.x += body.accel.x * dt;
+      vel.y += body.accel.y * dt;
+      clampBodySpeed(vel);
+    }
+  }
+
+  function clampBodySpeed(vel) {
+    const speed = Math.hypot(vel.x, vel.y);
+    if (speed <= MAX_BODY_SPEED || speed < 1e-9) return;
+    vel.x = (vel.x / speed) * MAX_BODY_SPEED;
+    vel.y = (vel.y / speed) * MAX_BODY_SPEED;
+  }
+
+  /**
+   * Napnuté lano se nesmí prodlužovat: odečti složku rychlostí podél gradientu
+   * délky (ráz v laně). Bez toho by soustava po dopnutí lana kmitala.
+   */
+  function projectBodyVelocities(system) {
+    for (let iter = 0; iter < 4; iter += 1) {
+      let maxRate = 0;
+      for (const c of system.constraints) {
+        if (!c.canCarry || c.slack || !c.terms.length) continue;
+        let rate = 0;
+        let denom = 0;
+        for (const term of c.terms) {
+          const vel = term.obj?.vel;
+          if (!vel) continue;
+          rate += vecDot(term.grad, vel);
+          denom +=
+            (term.grad.x * term.grad.x + term.grad.y * term.grad.y) / term.mass;
+        }
+        if (denom < 1e-9 || rate <= 1e-6) continue;
+        maxRate = Math.max(maxRate, rate);
+        const lambda = rate / denom;
+        for (const term of c.terms) {
+          const vel = term.obj?.vel;
+          if (!vel) continue;
+          vel.x -= (lambda * term.grad.x) / term.mass;
+          vel.y -= (lambda * term.grad.y) / term.mass;
+        }
+      }
+      if (maxRate < 1e-6) break;
+    }
+  }
+
+  /** Posuň volné kladky podle jejich rychlosti (každou zvlášť). */
+  function moveFreePulleyBodies(system, dt) {
+    const { width } = stageSize();
+    let moved = false;
+    for (const body of system.bodies.values()) {
+      if (body.kind !== "pulley") continue;
+      const pulley = body.obj;
+      const dx = pulley.vel.x * dt;
+      const dy = pulley.vel.y * dt;
+      if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) continue;
+      setFreePulleyPositionDelta(pulley, dx, dy);
+      syncRodWeightForPulley(pulley, pulley.vel);
+      moved = true;
+      const maxLeft = Math.max(0, width - (pulley.el.offsetWidth || 0));
+      const left = parseFloat(pulley.el.style.left) || 0;
+      if (left <= 0.5 || left >= maxLeft - 0.5) pulley.vel.x = 0;
+    }
+    if (moved) rebuildAllRopes();
   }
 
   function ensureSnapMarker() {
@@ -7812,8 +7779,9 @@
       if (freePulleyHasRopeSupport(pulley)) continue;
 
       pulley.vel.x = 0;
-      pulley.vel.y = GRAVITY;
-      moveFreePulleyBy(pulley, 0, GRAVITY * dt);
+      pulley.vel.y += GRAVITY * dt;
+      clampBodySpeed(pulley.vel);
+      moveFreePulleyBy(pulley, 0, pulley.vel.y * dt);
 
       const rodW = weights.find(
         (w) => w.snap.type === "rod" && w.snap.pulley === pulley.el
@@ -7897,6 +7865,11 @@
   }
 
   function physicsStep(dt) {
+    const system = buildRopeSystem();
+    applyWinchReeling(system, dt);
+    integrateBodyVelocities(system, dt);
+    projectBodyVelocities(system);
+    moveFreePulleyBodies(system, dt);
     simulateRopes(dt);
     simulateFreePulleys(dt);
 
@@ -7911,7 +7884,8 @@
       }
 
       weight.vel.x = 0;
-      weight.vel.y = GRAVITY;
+      weight.vel.y += GRAVITY * dt;
+      clampBodySpeed(weight.vel);
       const hook = getWeightHookWorld(weight);
       let nextHook = {
         x: hook.x + weight.vel.x * dt,
