@@ -1,0 +1,13 @@
+{
+  "name": "kladkostroj",
+  "version": "1.0.0",
+  "description": "Kladkostroj — sestavování z volných a pevných kladek",
+  "license": "MIT",
+  "scripts": {
+    "start": "npx --yes live-server --port=3480 --no-browser --watch=.",
+    "dev": "npm start"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
