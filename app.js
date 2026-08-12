@@ -1776,22 +1776,55 @@
     return [first, last];
   }
 
+  /** @type {WeakMap<SVGSVGElement, SVGCircleElement>} */
+  const svgCoordProbeCache = new WeakMap();
+
+  /** Skrytá sonda v SVG — getBoundingClientRect zahrnuje i CSS transform rodičů (Safari/tablet). */
+  function ensureSvgCoordProbe(svg) {
+    let probe = svgCoordProbeCache.get(svg);
+    if (probe?.isConnected) return probe;
+    probe = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    probe.setAttribute("data-wheel-probe", "1");
+    probe.setAttribute("r", "0.001");
+    probe.setAttribute("fill", "none");
+    probe.setAttribute("stroke", "none");
+    probe.setAttribute("pointer-events", "none");
+    probe.setAttribute("visibility", "hidden");
+    svg.appendChild(probe);
+    svgCoordProbeCache.set(svg, probe);
+    return probe;
+  }
+
+  function svgUserToClient(svg, ux, uy) {
+    if (!svg) return null;
+    const probe = ensureSvgCoordProbe(svg);
+    probe.setAttribute("cx", String(ux));
+    probe.setAttribute("cy", String(uy));
+    const rect = probe.getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) {
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      };
+    }
+    return { x: rect.left, y: rect.top };
+  }
+
   function getWheelWorld(el, kind) {
     const meta = WHEEL[kind];
     const svg = el.querySelector("svg");
     const stageRect = stage.getBoundingClientRect();
-    const ctm = svg.getScreenCTM();
+    if (!svg) {
+      return { cx: 0, cy: 0, r: 0 };
+    }
 
-    if (ctm) {
-      const pt = svg.createSVGPoint();
-      pt.x = meta.cx;
-      pt.y = meta.cy;
-      const screen = pt.matrixTransform(ctm);
-      const scale = Math.hypot(ctm.a, ctm.b);
+    const center = svgUserToClient(svg, meta.cx, meta.cy);
+    const rim = svgUserToClient(svg, meta.cx + meta.grooveR, meta.cy);
+    if (center && rim) {
       return {
-        cx: screen.x - stageRect.left,
-        cy: screen.y - stageRect.top,
-        r: meta.grooveR * scale,
+        cx: center.x - stageRect.left,
+        cy: center.y - stageRect.top,
+        r: Math.hypot(rim.x - center.x, rim.y - center.y),
       };
     }
 
@@ -4743,15 +4776,11 @@
 
   function svgPointToStage(svg, x, y) {
     const stageRect = stage.getBoundingClientRect();
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
-    const pt = svg.createSVGPoint();
-    pt.x = x;
-    pt.y = y;
-    const screen = pt.matrixTransform(ctm);
+    const client = svgUserToClient(svg, x, y);
+    if (!client) return { x: 0, y: 0 };
     return {
-      x: screen.x - stageRect.left,
-      y: screen.y - stageRect.top,
+      x: client.x - stageRect.left,
+      y: client.y - stageRect.top,
     };
   }
 
