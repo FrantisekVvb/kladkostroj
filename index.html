@@ -929,6 +929,15 @@
         pointer-events: none;
       }
 
+      /* Režim Síly — scéna ztlumená, šipky sil plně viditelné */
+      .app-root.is-show-forces #stage > *:not(#force-overlay) {
+        opacity: 0.3;
+      }
+
+      .app-root.is-show-forces #force-overlay {
+        opacity: 1;
+      }
+
       .force-arrow {
         pointer-events: none;
       }
