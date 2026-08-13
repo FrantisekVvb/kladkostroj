@@ -54,8 +54,13 @@
 
   const CLOSE_SNAP_RADIUS = 28;
   const END_GRAB_RADIUS = 24;
-  /** Maximální obepnutí — max ~půl + kousek; celý závit ani „přes kladku“ ne. */
-  const MAX_WRAP_TRAVEL = Math.PI + 0.4;
+  /**
+   * Maximální obepnutí — těsně pod celým závitem. Volná kladka v oku lana,
+   * jehož ramena se nad ní sbíhají, potřebuje výrazně víc než půlkruh.
+   */
+  const MAX_WRAP_TRAVEL = 2 * Math.PI - 0.35;
+  /** Nad tímto obloukem se obepnutí mírně penalizuje (kratší je pravděpodobnější). */
+  const LONG_WRAP_TRAVEL = Math.PI + 0.15;
   /** Minimální obepnutí — jen proti ostrému „V“ zlomu (ne proti platným krátkým obloukům). */
   const MIN_WRAP_TRAVEL = 0.35;
   /** Pás přimknutí lana k obvodu kladky (px za poloměrem drážky). */
@@ -65,6 +70,14 @@
   const WRAP_POINT_PAD = 2;
   /** Bod v jádře kladky (osa) nepatří k obepnutí po obvodu. */
   const WRAP_HUB_RATIO = 0.45;
+  /** Nejkratší úsek tahu v pásmu přimknutí, který se ještě počítá jako obepnutí. */
+  const WRAP_MIN_BAND_LENGTH = 12;
+  /** O kolik musí prohození obepnutí lano zkrátit, aby se topologie přerovnala. */
+  const WRAP_REORDER_TOLERANCE = 6;
+  /** Obepnutí, které lano prodlouží o méně, už lano nevede — uvolní se. */
+  const WRAP_STALE_DETOUR = 6;
+  /** Kolika obepnutím se hledá smysl oblouku hrubou silou (2^n variant). */
+  const MAX_WRAP_DIRECTION_SEARCH = 4;
 
   /** Konec volné tyčky u modré kladky (SVG souřadnice). */
   const FREE_ROD_TIP = { x: 143.314, y: 103.887 };
@@ -127,6 +140,20 @@
   const WINCH_SPIN_DEG_PER_S = 130;
   /** Hmotnost modré kladky — zanedbatelná. */
   const PULLEY_MASS = 0;
+  /**
+   * Náhradní hmotnost tělesa bez zátěže. Soustava napětí se počítá přes
+   * zrychlení (F/m), takže nulová hmotnost by kladku ze soustavy vyřadila —
+   * a pohyblivý blok kladkostroje by pak sílu nepůlil. Zlomek závaží je proti
+   * zátěži zanedbatelný a řešení tím vyjde jako pro nehmotnou kladku.
+   */
+  const MIN_BODY_MASS = 1e-3;
+  /**
+   * Setrvačnost nezatížené kladky napříč osou zátěže. Nehmotné těleso musí být
+   * přesně v rovnováze, takže i pár stupňů šikmé lano by napětí srazilo na nulu.
+   * Napříč osou se proto chová jako závaží — nepatrné vychýlení se jen pomalu
+   * vykývá, místo aby rozhodilo celou soustavu.
+   */
+  const SWING_BODY_MASS = 1;
   /** Numerická pojistka na rychlost tělesa (px/s). */
   const MAX_BODY_SPEED = 4000;
   /** Pod touto tolerancí (px) je lano považované za napnuté. */
@@ -639,6 +666,7 @@
       }
       pulleyResizeDrag = null;
       handle.classList.remove("is-dragging");
+      resettleRopeWraps();
       endUserAction();
     }
 
@@ -907,7 +935,7 @@
     for (const wheel of collectWheels()) {
       const center = { x: wheel.cx, y: wheel.cy };
       const d = dist(p, center);
-      if (d > CLOSE_SNAP_RADIUS) continue;
+      if (d > pulleyCenterSnapRadius(wheel)) continue;
       if (!best || d < best.d) {
         best = {
           type: "pulleyCenter",
@@ -1953,18 +1981,64 @@
     el.style.top = `${top + (cy - wheel.cy)}px`;
   }
 
-  function collectWheels() {
-    const wheels = [];
+  /**
+   * Měření kola vynucuje přepočet layoutu, ale ve fyzice se geometrie čte
+   * stokrát za krok — drží se tedy v cache. Klíč se skládá jen z hodnot,
+   * které se čtou bez layoutu, takže se cache sama zneplatní při jakékoli
+   * změně polohy, měřítka nebo zadokování kladky.
+   */
+  let wheelCache = { token: null, wheels: [] };
+  /** Zkušební posun jedné kladky bez zápisu do DOM (numerický gradient délky). */
+  let wheelProbeOffset = null;
+
+  function wheelCacheToken() {
+    const { width, height } = stageSize();
+    let token = `${Math.round(width)}x${Math.round(height)}|${globalStageScale}`;
     for (const pulley of pulleys) {
-      if (!pulley.el.isConnected || isDocked(pulley.el)) continue;
-      wheels.push({
-        ...getWheelWorld(pulley.el, pulley.kind),
-        kind: pulley.kind,
-        id: pulley.id,
-        el: pulley.el,
-      });
+      const el = pulley.el;
+      token += `;${pulley.id}|${el.isConnected ? 1 : 0}|${el.className}|${
+        el.getAttribute("style") || ""
+      }`;
     }
-    return wheels;
+    return token;
+  }
+
+  /** Identita aktuální geometrie kol — klíč pro memoizaci odvozených výpočtů. */
+  function wheelGeometryToken() {
+    const base = wheelCache.token || "";
+    if (!wheelProbeOffset) return base;
+    return `${base}#${wheelProbeOffset.id}:${wheelProbeOffset.dx}:${wheelProbeOffset.dy}`;
+  }
+
+  function setWheelProbeOffset(offset) {
+    wheelProbeOffset = offset;
+  }
+
+  function collectWheels() {
+    const token = wheelCacheToken();
+    if (token !== wheelCache.token) {
+      const wheels = [];
+      for (const pulley of pulleys) {
+        if (!pulley.el.isConnected || isDocked(pulley.el)) continue;
+        wheels.push({
+          ...getWheelWorld(pulley.el, pulley.kind),
+          kind: pulley.kind,
+          id: pulley.id,
+          el: pulley.el,
+        });
+      }
+      wheelCache = { token, wheels };
+    }
+    if (!wheelProbeOffset) return wheelCache.wheels;
+    return wheelCache.wheels.map((w) =>
+      w.id === wheelProbeOffset.id
+        ? {
+            ...w,
+            cx: w.cx + wheelProbeOffset.dx,
+            cy: w.cy + wheelProbeOffset.dy,
+          }
+        : w
+    );
   }
 
   function pointOnCircle(wheel, angle) {
@@ -1972,6 +2046,22 @@
       x: wheel.cx + wheel.r * Math.cos(angle),
       y: wheel.cy + wheel.r * Math.sin(angle),
     };
+  }
+
+  /**
+   * Pásmo, ve kterém se lano přimkne k drážce. Roste s kolem — u zmenšené
+   * kladky by pevných 10 px byla polovina poloměru.
+   */
+  function wrapAdhesionBand(wheel) {
+    return Math.max(
+      wheel.r * WRAP_ADHESION_BAND_RATIO,
+      Math.min(WRAP_ADHESION_BAND_MIN, wheel.r * 0.25)
+    );
+  }
+
+  /** Dosah přichycení konce lana k ose kladky — u malé kladky menší než obvod. */
+  function pulleyCenterSnapRadius(wheel) {
+    return Math.min(CLOSE_SNAP_RADIUS, Math.max(12, wheel.r * 0.6));
   }
 
   /**
@@ -1992,28 +2082,27 @@
     return base + side * alpha;
   }
 
-  /** Směr přiblížení / odchodu — první bod mimo pásmo obepnutí. */
-  function wheelApproachAngle(wheel, pts, fromIdx, which) {
-    const band = Math.max(WRAP_ADHESION_BAND_MIN, wheel.r * WRAP_ADHESION_BAND_RATIO);
-    const outer = wheel.r + band + 6;
+  /** Bod, ze kterého tah ke kladce přichází / kam odchází — první mimo pásmo. */
+  function wheelApproachPoint(wheel, pts, fromIdx, which) {
+    const outer = wheel.r + wrapAdhesionBand(wheel) + 6;
     const distTo = (p) => Math.hypot(p.x - wheel.cx, p.y - wheel.cy);
 
     if (which === "enter") {
       for (let i = Math.min(fromIdx, pts.length - 1); i >= 0; i -= 1) {
-        if (distTo(pts[i]) >= outer) {
-          return Math.atan2(pts[i].y - wheel.cy, pts[i].x - wheel.cx);
-        }
+        if (distTo(pts[i]) >= outer) return pts[i];
       }
-      const p = pts[0];
-      return Math.atan2(p.y - wheel.cy, p.x - wheel.cx);
+      return pts[0];
     }
 
     for (let i = Math.max(fromIdx, 0); i < pts.length; i += 1) {
-      if (distTo(pts[i]) >= outer) {
-        return Math.atan2(pts[i].y - wheel.cy, pts[i].x - wheel.cx);
-      }
+      if (distTo(pts[i]) >= outer) return pts[i];
     }
-    const p = pts[pts.length - 1];
+    return pts[pts.length - 1];
+  }
+
+  /** Směr přiblížení / odchodu — první bod mimo pásmo obepnutí. */
+  function wheelApproachAngle(wheel, pts, fromIdx, which) {
+    const p = wheelApproachPoint(wheel, pts, fromIdx, which);
     return Math.atan2(p.y - wheel.cy, p.x - wheel.cx);
   }
 
@@ -2063,14 +2152,27 @@
    */
   function findWraps(points, wheel) {
     // Užší pás: lano se obepne jen při tahu těsně podél obvodu.
-    const band = Math.max(WRAP_ADHESION_BAND_MIN, wheel.r * WRAP_ADHESION_BAND_RATIO);
-    const outer = wheel.r + band;
+    const outer = wheel.r + wrapAdhesionBand(wheel);
     const farLimit = wheel.r * 2.8;
     const distTo = (p) => Math.hypot(p.x - wheel.cx, p.y - wheel.cy);
-    const near = points.map((p) => {
+    const pointNear = points.map((p) => {
       if (isPointInWheelHub(p, wheel)) return false;
       return distTo(p) <= outer;
     });
+
+    // Rozhoduje úsečka, ne vzorek: rychlý tah má body daleko od sebe a kladku
+    // by minul, i když jde přímo podél drážky.
+    const near = pointNear.slice();
+    for (let i = 0; i + 1 < points.length; i += 1) {
+      if (near[i] && near[i + 1]) continue;
+      if (isPointInWheelHub(points[i], wheel) && isPointInWheelHub(points[i + 1], wheel)) {
+        continue;
+      }
+      if (segmentClosestDist(points[i], points[i + 1], wheel) <= outer) {
+        near[i] = true;
+        near[i + 1] = true;
+      }
+    }
 
     const raw = [];
     let i = 0;
@@ -2119,23 +2221,50 @@
 
     const wraps = [];
     for (const run of merged) {
-      const runLen = points
-        .slice(run.start, run.end + 1)
-        .reduce((s, p, k, arr) => (k ? s + dist(arr[k - 1], p) : s), 0);
-      if (run.end - run.start >= 2 && runLen >= 12) {
+      if (run.end <= run.start) continue;
+      if (strokeLengthInsideBand(points, run, wheel, outer) >= WRAP_MIN_BAND_LENGTH) {
         wraps.push(run);
       }
     }
     return wraps;
   }
 
+  /**
+   * Délka tahu uvnitř pásma přimknutí. Počítá se přesně z úseček, takže
+   * výsledek nezávisí na tom, jak rychle uživatel kreslil.
+   */
+  function strokeLengthInsideBand(points, run, wheel, outer) {
+    let len = 0;
+    for (let i = run.start; i < run.end; i += 1) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      const dx = p1.x - p0.x;
+      const dy = p1.y - p0.y;
+      const a = dx * dx + dy * dy;
+      if (a < 1e-9) continue;
+      const fx = p0.x - wheel.cx;
+      const fy = p0.y - wheel.cy;
+      const b = 2 * (fx * dx + fy * dy);
+      const c = fx * fx + fy * fy - outer * outer;
+      const disc = b * b - 4 * a * c;
+      if (disc <= 0) continue;
+      const sq = Math.sqrt(disc);
+      const t0 = clamp((-b - sq) / (2 * a), 0, 1);
+      const t1 = clamp((-b + sq) / (2 * a), 0, 1);
+      if (t1 > t0) len += (t1 - t0) * Math.sqrt(a);
+    }
+    return len;
+  }
+
   function wrapDirection(points, start, end, wheel) {
     if (end <= start) return "cw";
 
-    const enterHint = wheelApproachAngle(wheel, points, 0, "enter");
-    const leaveHint = wheelApproachAngle(wheel, points, points.length - 1, "leave");
-    const startPt = points[0];
-    const endPt = points[points.length - 1];
+    // Rozhoduje okolí této kladky, ne konce celého lana — jinak je vodítko
+    // u druhé a další kladky systematicky mimo.
+    const startPt = wheelApproachPoint(wheel, points, start, "enter");
+    const endPt = wheelApproachPoint(wheel, points, end, "leave");
+    const enterHint = Math.atan2(startPt.y - wheel.cy, startPt.x - wheel.cx);
+    const leaveHint = Math.atan2(endPt.y - wheel.cy, endPt.x - wheel.cx);
 
     let bestCw = true;
     let bestScore = -Infinity;
@@ -2179,19 +2308,22 @@
     return dist(a, b) < 4 && Math.abs(a.r - b.r) < 4;
   }
 
-  function segmentClosestDist(p0, p1, wheel) {
+  function closestPointOnSegment(p0, p1, target) {
     const dx = p1.x - p0.x;
     const dy = p1.y - p0.y;
     const lenSq = dx * dx + dy * dy;
-    if (lenSq < 1e-8) {
-      return Math.hypot(p0.x - wheel.cx, p0.y - wheel.cy);
-    }
+    if (lenSq < 1e-8) return { x: p0.x, y: p0.y };
     const t = clamp(
-      ((wheel.cx - p0.x) * dx + (wheel.cy - p0.y) * dy) / lenSq,
+      ((target.x - p0.x) * dx + (target.y - p0.y) * dy) / lenSq,
       0,
       1
     );
-    return Math.hypot(p0.x + t * dx - wheel.cx, p0.y + t * dy - wheel.cy);
+    return { x: p0.x + t * dx, y: p0.y + t * dy };
+  }
+
+  function segmentClosestDist(p0, p1, wheel) {
+    const q = closestPointOnSegment(p0, p1, { x: wheel.cx, y: wheel.cy });
+    return Math.hypot(q.x - wheel.cx, q.y - wheel.cy);
   }
 
   /** Úsek jde skrz kladku nebo těsně podél obvodu (má se obepnout, ne obejít). */
@@ -2439,6 +2571,35 @@
       return false;
     }
     return dist(p0, closest) >= endClear && dist(p1, closest) >= endClear;
+  }
+
+  /**
+   * Drží lano na kole, nebo by po oblouku sklouzlo?
+   *
+   * Lano umí kolo jen tlačit. Výslednice tahů obou ramen musí proto mířit
+   * dovnitř oblouku (proti jeho středu). Když míří stejným směrem, jako se
+   * oblouk vyklání, jde o obepnutí „přes vršek“, které by se samo rozpadlo.
+   * Vrací hodnotu od −1 (pevně dosedlé) do +1 (sklouzne).
+   */
+  function wrapSlipMeasure(wheel, enterAng, leaveAng, clockwise, fromP, toP) {
+    if (!fromP || !toP) return -1;
+    const enterP = pointOnCircle(wheel, enterAng);
+    const leaveP = pointOnCircle(wheel, leaveAng);
+    const uIn = unitVec(enterP, fromP);
+    const uOut = unitVec(leaveP, toP);
+    const sx = uIn.x + uOut.x;
+    const sy = uIn.y + uOut.y;
+    const pull = Math.hypot(sx, sy);
+    if (pull < 1e-6) return 0;
+    const mid = enterAng + wrapTravelRaw(enterAng, leaveAng, clockwise) / 2;
+    return (Math.cos(mid) * sx + Math.sin(mid) * sy) / pull;
+  }
+
+  /** Sklouzlo by lano z takto vedeného oblouku? */
+  function wrapWouldSlip(wheel, enterAng, leaveAng, clockwise, fromP, toP) {
+    return (
+      wrapSlipMeasure(wheel, enterAng, leaveAng, clockwise, fromP, toP) > 0.05
+    );
   }
 
   /** Směr oblouku: vybere smysl s přirozeným obepnutím (ne zlom, ne celý kruh). */
@@ -2901,8 +3062,8 @@
         );
         if (travel < MIN_WRAP_TRAVEL - 1e-6 || travel > MAX_WRAP_TRAVEL + 1e-6) {
           score -= 5000;
-        } else if (travel > Math.PI + 0.15) {
-          // Mírně nad půlkruhem je OK (volná kladka), skoro celý závit ne
+        } else if (travel > LONG_WRAP_TRAVEL) {
+          // Nad půlkruhem je OK (volná kladka v oku), kratší oblouk je běžnější
           score -= (travel - Math.PI) * 8;
         }
 
@@ -2929,14 +3090,19 @@
         if (segmentPiercesWheel(leaveP, toP, w.wheel, 8)) score -= 2000;
         if (segmentCrossesWheel(fromP, enterP, w.wheel, 1)) score -= 4000;
         if (segmentCrossesWheel(leaveP, toP, w.wheel, 1)) score -= 4000;
+        if (
+          wrapWouldSlip(w.wheel, enterAng[i], leaveAng[i], cws[i], fromP, toP)
+        ) {
+          score -= 6000;
+        }
       }
       return { score, enterAng, leaveAng, cws: cws.slice() };
     }
 
-    // Vyzkoušej kombinace smyslu oblouku (max 2 kladky → 4 varianty)
+    // Vyzkoušej kombinace smyslu oblouku
     const hint = wraps.map((w) => w.clockwise);
     let best = null;
-    const limit = Math.min(n, 3);
+    const limit = Math.min(n, MAX_WRAP_DIRECTION_SEARCH);
     const total = 1 << limit;
     for (let mask = 0; mask < total; mask += 1) {
       const cws = hint.slice();
@@ -3047,11 +3213,27 @@
     return wraps;
   }
 
+  /** Úsek tahu nejblíž ke kolu — náhrada rozpětí, když detekce nic nenašla. */
+  function nearestStrokeSpan(pts, wheel) {
+    if (!pts || pts.length < 2) return { start: 0, end: 1 };
+    let bestIdx = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < pts.length; i += 1) {
+      const d = Math.hypot(pts[i].x - wheel.cx, pts[i].y - wheel.cy);
+      if (d < bestD) {
+        bestD = d;
+        bestIdx = i;
+      }
+    }
+    const start = Math.max(0, Math.min(bestIdx - 1, pts.length - 2));
+    return { start, end: Math.min(pts.length - 1, start + 2) };
+  }
+
   /**
    * Lepkavé obepnutí — jednou detekovaná kladka zůstane, i když je kurzor už daleko
    * (simplify jinak wrap zahodí a lano „odskočí“).
    */
-  function wrapsFromStickyIds(pts, stickyIds) {
+  function wrapsFromStickyIds(pts, stickyIds, detected = []) {
     if (!stickyIds || !stickyIds.length) return [];
     const wheels = collectWheels();
     const out = [];
@@ -3059,12 +3241,16 @@
       const wheel = wheels.find((w) => w.id === id);
       if (!wheel) continue;
       if (out.some((w) => sameWheel(w.wheel, wheel))) continue;
-      const i = out.length;
+      // Rozpětí v tahu je vodítkem pro směr oblouku i pro polohu volných
+      // úseků — vymyšlené indexy z něj dělají nesmysl.
+      const found = detected.find((w) => sameWheel(w.wheel, wheel));
+      const span = found || nearestStrokeSpan(pts, wheel);
       out.push({
-        start: i * 2,
-        end: i * 2 + 1,
+        start: span.start,
+        end: span.end,
         wheel,
-        clockwise: true,
+        clockwise: found ? found.clockwise : true,
+        detected: !!found,
       });
     }
     return out;
@@ -3072,13 +3258,12 @@
 
   function mergeStickyWraps(pts, wraps, stickyIds) {
     if (!stickyIds || !stickyIds.length) return wraps;
-    const sticky = wrapsFromStickyIds(pts, stickyIds);
+    const sticky = wrapsFromStickyIds(pts, stickyIds, wraps);
     if (!sticky.length) return wraps;
-
-    // Zachovej pořadí sticky; doplň směr z případné detekce
-    for (const s of sticky) {
-      const found = wraps.find((w) => sameWheel(w.wheel, s.wheel));
-      if (found) s.clockwise = found.clockwise;
+    // Pořadí podle tahu bere jen tehdy, když detekce našla všechna rozpětí;
+    // u kladky odtažené od tahu je odhad rozpětí nejistý.
+    if (sticky.every((w) => w.detected)) {
+      sticky.sort((a, b) => a.start - b.start || a.end - b.end);
     }
     return sticky;
   }
@@ -3318,9 +3503,11 @@
         null
       );
     }
+    // Konkrétní kladka se nenahrazuje jinou téhož druhu — po smazání kladky
+    // by lano potichu přeskočilo na cizí kolo. Druh slouží jen starším scénám
+    // bez id.
     if (ref.wheelId) {
-      const byId = wheels.find((w) => w.id === ref.wheelId);
-      if (byId) return byId;
+      return wheels.find((w) => w.id === ref.wheelId) || null;
     }
     if (ref.wheelKind) {
       return wheels.find((w) => (w.kind || "") === ref.wheelKind) || null;
@@ -3336,8 +3523,20 @@
     const n = model.wraps.length;
     if (!n) return null;
 
+    // Stejný model se stejnými konci se ptá opakovaně (délka, tečny, kreslení)
+    const memoKey = `${wheelGeometryToken()}|${startPt.x.toFixed(
+      2
+    )},${startPt.y.toFixed(2)}|${endPt.x.toFixed(2)},${endPt.y.toFixed(2)}|${model.wraps
+      .map((w) => `${w.wheelId}:${w.clockwise ? 1 : 0}`)
+      .join(",")}`;
+    if (model.liveMemoKey === memoKey) return model.liveMemo;
+
     const wheels = model.wraps.map((w) => resolveModelWheel(w));
-    if (wheels.some((w) => !w)) return null;
+    if (wheels.some((w) => !w)) {
+      model.liveMemoKey = memoKey;
+      model.liveMemo = null;
+      return null;
+    }
 
     function scoreCws(cws) {
       const enterAng = new Array(n);
@@ -3398,6 +3597,8 @@
         );
         if (travel < MIN_WRAP_TRAVEL - 1e-6 || travel > MAX_WRAP_TRAVEL + 1e-6) {
           score -= 5000;
+        } else if (travel > LONG_WRAP_TRAVEL) {
+          score -= (travel - Math.PI) * 8;
         }
 
         const enterP = pointOnCircle(wheels[i], enterAng[i]);
@@ -3424,6 +3625,13 @@
         if (segmentCrossesWheel(fromP, enterP, wheels[i], 1)) score -= 5000;
         if (segmentCrossesWheel(leaveP, toP, wheels[i], 1)) score -= 5000;
 
+        // Lano musí na kolo dosednout, ne po něm sklouznout
+        if (
+          wrapWouldSlip(wheels[i], enterAng[i], leaveAng[i], cws[i], fromP, toP)
+        ) {
+          score -= 6000;
+        }
+
         // Volný úsek nesmí procházet ani cizí kladkou
         for (let j = 0; j < n; j += 1) {
           if (j === i) continue;
@@ -3446,7 +3654,7 @@
 
     const hint = model.wraps.map((w) => w.clockwise);
     let best = null;
-    const limit = Math.min(n, 3);
+    const limit = Math.min(n, MAX_WRAP_DIRECTION_SEARCH);
     const total = 1 << limit;
     for (let mask = 0; mask < total; mask += 1) {
       const cws = hint.slice();
@@ -3456,6 +3664,8 @@
       const cand = scoreCws(cws);
       if (!best || cand.score > best.score) best = cand;
     }
+    model.liveMemoKey = memoKey;
+    model.liveMemo = best;
     return best;
   }
 
@@ -3963,15 +4173,19 @@
     return { x: dx / len, y: dy / len };
   }
 
-  /** Směry napětí v laně u konců a u volné kladky (bez změny obepnutí). */
-  function getRopeAttachmentVectors(model, startPt, endPt) {
+  /**
+   * Lomená čára lana: konce + tečné body obepnutí. Obepnutí s nedostupnou
+   * kladkou (smazaná za běhu) se přeskočí, aby indexy zůstaly konzistentní.
+   */
+  function modelChain(model, startPt, endPt) {
+    const pts = [startPt];
+    const items = [];
     const count = model.wraps.length;
-    const chain = [startPt];
-
     for (let i = 0; i < count; i += 1) {
       const w = model.wraps[i];
       const wheel = resolveModelWheel(w);
-      const { enterAng, leaveAng } = wrapAnglesAtEndpoints(
+      if (!wheel) continue;
+      const { enterAng, leaveAng, clockwise } = wrapAnglesAtEndpoints(
         model,
         startPt,
         endPt,
@@ -3980,12 +4194,26 @@
         i,
         count
       );
-      chain.push(
+      items.push({
+        wrap: w,
+        wheel,
+        enterIdx: pts.length,
+        enterAng,
+        leaveAng,
+        clockwise,
+      });
+      pts.push(
         pointOnCircle(wheel, enterAng),
         pointOnCircle(wheel, leaveAng)
       );
     }
-    chain.push(endPt);
+    pts.push(endPt);
+    return { pts, items };
+  }
+
+  /** Směry napětí v laně u konců a u volné kladky (bez změny obepnutí). */
+  function getRopeAttachmentVectors(model, startPt, endPt) {
+    const { pts: chain, items } = modelChain(model, startPt, endPt);
 
     const startU = unitVec(chain[0], chain[1]);
     const endU = unitVec(chain[chain.length - 1], chain[chain.length - 2]);
@@ -3997,23 +4225,23 @@
 
     /** Body dotyku lana s každou kladkou + směr tahu na kladku. */
     const contacts = [];
-    for (let i = 0; i < count; i += 1) {
-      const prev = chain[i * 2];
-      const enter = chain[i * 2 + 1];
-      const leave = chain[i * 2 + 2];
-      const next = chain[i * 2 + 3];
+    for (const item of items) {
+      const prev = chain[item.enterIdx - 1];
+      const enter = chain[item.enterIdx];
+      const leave = chain[item.enterIdx + 1];
+      const next = chain[item.enterIdx + 2];
       const enterU = unitVec(prev, enter);
       const leaveU = unitVec(leave, next);
       contacts.push({
-        wheelKind: model.wraps[i].wheelKind,
-        wheelId: model.wraps[i].wheelId,
+        wheelKind: item.wrap.wheelKind,
+        wheelId: item.wrap.wheelId,
         enterPt: { x: enter.x, y: enter.y },
         leavePt: { x: leave.x, y: leave.y },
         /** Síla lana na kladku u vstupu (směr od kladky po laně ven). */
         enterPull: { x: -enterU.x, y: -enterU.y },
         leavePull: { x: leaveU.x, y: leaveU.y },
       });
-      if (model.wraps[i].wheelKind === "free" && !freeEnterPt) {
+      if (item.wrap.wheelKind === "free" && !freeEnterPt) {
         freeEnterU = enterU;
         freeLeaveU = leaveU;
         freeEnterPt = { x: enter.x, y: enter.y };
@@ -4099,24 +4327,22 @@
           base) /
         eps;
     }
-    if (opts.pulleyFree && opts.pulleyEl) {
-      const el = opts.pulleyEl;
-      const left0 = parseFloat(el.style.left) || 0;
-      const top0 = parseFloat(el.style.top) || 0;
-      el.style.left = `${left0 + eps}px`;
+    // Kladkou se hýbe jen v cache geometrie — zápis do DOM by na každý gradient
+    // vynutil přepočet layoutu.
+    if (opts.pulleyFree && pulley) {
+      setWheelProbeOffset({ id: pulley.id, dx: eps, dy: 0 });
       {
         const pts = endpointsWithPulleyCenters(rope, startPt, endPt, pulley);
         const movedX = measureModelLength(model, pts.start, pts.end);
         grad.pulley.x = (movedX - base) / eps;
       }
-      el.style.left = `${left0}px`;
-      el.style.top = `${top0 + eps}px`;
+      setWheelProbeOffset({ id: pulley.id, dx: 0, dy: eps });
       {
         const pts = endpointsWithPulleyCenters(rope, startPt, endPt, pulley);
         const movedY = measureModelLength(model, pts.start, pts.end);
         grad.pulley.y = (movedY - base) / eps;
       }
-      el.style.top = `${top0}px`;
+      setWheelProbeOffset(null);
     }
 
     return grad;
@@ -4145,7 +4371,11 @@
     return { x: fx, y: fy };
   }
 
-  /** Všechny dotyky lana s danou volnou kladkou. */
+  /**
+   * Všechny dotyky lana s danou volnou kladkou. Geometrie zatím dovolí jedno
+   * obepnutí na kladku a lano, takže víc dotyků vzniká jen z různých lan;
+   * součet je připravený i na vícenásobné obepnutí jedním lanem.
+   */
   function freePulleyContacts(attach, freePulley) {
     if (!freePulley || !attach?.contacts?.length) return [];
     return attach.contacts.filter(
@@ -4331,8 +4561,7 @@
 
     const freePulleys = getRopeMovableFreePulleys(rope, model);
     for (const pulley of freePulleys) {
-      const mass = freePulleyMass(pulley.el);
-      if (mass <= 1e-8) continue;
+      const mass = Math.max(freePulleyMass(pulley.el), MIN_BODY_MASS);
       addTerm({
         kind: "pulley",
         obj: pulley,
@@ -4365,18 +4594,46 @@
   }
 
   /**
-   * Napětí ve všech lanech současně: A·T = b s podmínkou T ≥ 0 (lano jen táhne).
-   * A_kl = Σ_i (∇_i L_k · u_l,i)/m_i, b_k = −Σ_i (∇_i L_k · Fg_i)/m_i.
-   * Řešeno projekční Gauss–Seidelovou iterací.
+   * Osa zátěže tělesa — směr nejsilnějšího tahu lana. Jen podél ní se
+   * nezatížená kladka chová jako nehmotná.
    */
-  function solveRopeTensions(constraints) {
-    const active = [];
-    for (const c of constraints) {
-      c.tension = 0;
-      if (c.canCarry && !c.slack && c.terms.length) active.push(c);
+  function assignBodyAxes(constraints, bodies) {
+    for (const body of bodies.values()) {
+      body.light = body.mass <= MIN_BODY_MASS * 1.001;
+      body.axis = null;
+      if (!body.light) continue;
+      let longest = 0;
+      for (const c of constraints) {
+        const term = c.termByObj.get(body.obj);
+        if (!term) continue;
+        const len = Math.hypot(term.u.x, term.u.y);
+        if (len > longest) {
+          longest = len;
+          body.axis = { x: term.u.x / len, y: term.u.y / len };
+        }
+      }
     }
-    if (!active.length) return;
+  }
 
+  /** Zrychlení od síly: M⁻¹·F, u nezatížené kladky směrově odlišené. */
+  function accelFromForce(body, f) {
+    if (!body?.light || !body.axis) {
+      return { x: f.x / body.mass, y: f.y / body.mass };
+    }
+    const along = f.x * body.axis.x + f.y * body.axis.y;
+    const ax = along * body.axis.x;
+    const ay = along * body.axis.y;
+    return {
+      x: ax / body.mass + (f.x - ax) / SWING_BODY_MASS,
+      y: ay / body.mass + (f.y - ay) / SWING_BODY_MASS,
+    };
+  }
+
+  /**
+   * Soustava pro napětí zadané sady lan.
+   * A_kl = Σ_i ∇_i L_k · M_i⁻¹ u_l,i, b_k = −Σ_i ∇_i L_k · M_i⁻¹ Fg_i.
+   */
+  function ropeTensionSystem(active, bodies) {
     const n = active.length;
     const A = [];
     const b = [];
@@ -4384,19 +4641,56 @@
       const row = new Array(n).fill(0);
       let rhs = 0;
       for (const term of active[k].terms) {
-        rhs -= vecDot(term.grad, { x: 0, y: term.mass * GRAVITY }) / term.mass;
+        const body = bodies?.get(term.obj) || { mass: term.mass };
+        const g = accelFromForce(body, { x: 0, y: term.mass * GRAVITY });
+        rhs -= vecDot(term.grad, g);
         for (let l = 0; l < n; l += 1) {
           const other = active[l].termByObj.get(term.obj);
           if (!other) continue;
-          row[l] += vecDot(term.grad, other.u) / term.mass;
+          row[l] += vecDot(term.grad, accelFromForce(body, other.u));
         }
       }
       A.push(row);
       b.push(rhs);
     }
+    return { A, b };
+  }
 
+  /** Gauss–Jordan s výběrem pivota. Vrací null pro singulární soustavu. */
+  function solveDenseSystem(A, b) {
+    const n = b.length;
+    const m = A.map((row, i) => [...row, b[i]]);
+    for (let col = 0; col < n; col += 1) {
+      let pivot = col;
+      for (let r = col + 1; r < n; r += 1) {
+        if (Math.abs(m[r][col]) > Math.abs(m[pivot][col])) pivot = r;
+      }
+      if (!(Math.abs(m[pivot][col]) > 1e-9)) return null;
+      if (pivot !== col) {
+        const tmp = m[pivot];
+        m[pivot] = m[col];
+        m[col] = tmp;
+      }
+      for (let r = 0; r < n; r += 1) {
+        if (r === col) continue;
+        const f = m[r][col] / m[col][col];
+        if (!f) continue;
+        for (let c = col; c <= n; c += 1) m[r][c] -= f * m[col][c];
+      }
+    }
+    const x = new Array(n);
+    for (let i = 0; i < n; i += 1) {
+      x[i] = m[i][n] / m[i][i];
+      if (!Number.isFinite(x[i])) return null;
+    }
+    return x;
+  }
+
+  /** Záloha pro singulární soustavu — projekční Gauss–Seidel. */
+  function gaussSeidelTensions(A, b) {
+    const n = b.length;
     const T = new Array(n).fill(0);
-    for (let iter = 0; iter < 60; iter += 1) {
+    for (let iter = 0; iter < 200; iter += 1) {
       let delta = 0;
       for (let k = 0; k < n; k += 1) {
         if (Math.abs(A[k][k]) < 1e-9) {
@@ -4413,8 +4707,47 @@
       }
       if (delta < 1e-6) break;
     }
+    return T;
+  }
 
-    for (let k = 0; k < n; k += 1) active[k].tension = T[k];
+  /**
+   * Napětí ve všech lanech současně, s podmínkou T ≥ 0 (lano jen táhne).
+   *
+   * Soustava bývá silně nevyvážená — pohyblivý blok bez zátěže má proti závaží
+   * zanedbatelnou hmotnost, takže jeho řádky jsou o několik řádů větší. Iterace
+   * by konvergovala příliš pomalu, řeší se proto přímo; lano, které by muselo
+   * tlačit, se ze soustavy vyřadí a zbytek se dopočítá znovu.
+   */
+  function solveRopeTensions(constraints, bodies) {
+    const candidates = [];
+    for (const c of constraints) {
+      c.tension = 0;
+      if (c.canCarry && !c.slack && c.terms.length) candidates.push(c);
+    }
+    if (!candidates.length) return;
+
+    let active = candidates;
+    for (let guard = 0; guard <= candidates.length; guard += 1) {
+      if (!active.length) return;
+      const { A, b } = ropeTensionSystem(active, bodies);
+      const T = solveDenseSystem(A, b) || gaussSeidelTensions(A, b);
+
+      let worst = -1;
+      let worstValue = -1e-9;
+      for (let k = 0; k < T.length; k += 1) {
+        if (T[k] < worstValue) {
+          worstValue = T[k];
+          worst = k;
+        }
+      }
+      if (worst < 0) {
+        for (let k = 0; k < active.length; k += 1) {
+          active[k].tension = Math.max(0, T[k]);
+        }
+        return;
+      }
+      active = active.filter((_, k) => k !== worst);
+    }
   }
 
   /** Všechna lana, tělesa, napětí a výsledné síly pro aktuální geometrii. */
@@ -4428,7 +4761,8 @@
         buildRopeConstraint(rope, state.model, state.startPt, state.endPt, bodies)
       );
     }
-    solveRopeTensions(constraints);
+    assignBodyAxes(constraints, bodies);
+    solveRopeTensions(constraints, bodies);
 
     for (const c of constraints) {
       if (c.rope.sim) c.rope.sim.tension = c.tension;
@@ -4446,7 +4780,7 @@
         fy += c.tension * term.u.y;
       }
       body.force = { x: fx, y: fy };
-      body.accel = { x: fx / body.mass, y: fy / body.mass };
+      body.accel = accelFromForce(body, body.force);
     }
 
     return { bodies, constraints };
@@ -4698,71 +5032,83 @@
     updateWinchForceLabels(system);
     clearForceArrows();
     if (!showForces) return;
+    // Těleso může viset na víc lanech — tíhu i výslednici kresli jednou
+    const netByBody = new Map();
     for (const constraint of system.constraints) {
-      drawRopeForces(constraint);
+      drawRopeForces(constraint, netByBody);
+    }
+    for (const entry of netByBody.values()) {
+      if (shouldDrawNetForce(entry.fx, entry.fy)) {
+        drawForceArrow(entry.origin, entry.fx, entry.fy, "net");
+      }
     }
   }
 
-  function drawRopeForces(c) {
+  function drawRopeForces(c, netByBody) {
     const T = c.tension;
     for (const term of c.terms) {
-      if (term.kind === "weight") drawWeightForces(term, T);
-      else drawFreePulleyForces(c, term, T);
+      if (term.kind === "weight") drawWeightForces(term, T, netByBody);
+      else drawFreePulleyForces(c, term, T, netByBody);
     }
     drawFixedWheelForces(c, T);
     drawWinchForces(c, T);
   }
 
-  function drawWeightForces(term, T) {
-    const origin = getWeightHookWorld(term.obj);
-    const gy = term.mass * GRAVITY;
-    const tx = T * term.u.x;
-    const ty = T * term.u.y;
-    drawForceArrow(origin, 0, gy, "gravity");
-    if (T > 1e-6) drawTensionArrow(origin, tx, ty);
-    if (shouldDrawNetForce(tx, gy + ty)) {
-      drawForceArrow(origin, tx, gy + ty, "net");
+  /**
+   * Součet sil na těleso pro šipku výslednice. Při prvním lanu se přidá tíha
+   * a nakreslí její šipka, tahy dalších lan se přičtou.
+   */
+  function bodyNetEntry(netByBody, obj, origin, gy) {
+    let entry = netByBody?.get(obj);
+    if (!entry) {
+      entry = { origin, fx: 0, fy: gy };
+      netByBody?.set(obj, entry);
+      drawForceArrow(origin, 0, gy, "gravity");
     }
+    return entry;
   }
 
-  function drawFreePulleyForces(c, term, T) {
+  function drawWeightForces(term, T, netByBody) {
+    const origin = getWeightHookWorld(term.obj);
+    const net = bodyNetEntry(netByBody, term.obj, origin, term.mass * GRAVITY);
+    if (T <= 1e-6) return;
+    const tx = T * term.u.x;
+    const ty = T * term.u.y;
+    drawTensionArrow(origin, tx, ty);
+    net.fx += tx;
+    net.fy += ty;
+  }
+
+  function drawFreePulleyForces(c, term, T, netByBody) {
     const rope = c.rope;
     const wheel = getWheelWorld(term.obj.el, "free");
     if (!wheel) return;
     const origin = { x: wheel.cx, y: wheel.cy };
-    const gy = term.mass * GRAVITY;
+    const net = bodyNetEntry(netByBody, term.obj, origin, term.mass * GRAVITY);
     // Volný konec lana ⇒ T = 0; pro ukázku rovnováhy dopočti ideální tah
     const Tp = T > 1e-6 ? T : freePulleyDisplayTension(term);
-    let nx = 0;
-    let ny = gy;
-    drawForceArrow(origin, 0, gy, "gravity");
+    if (Tp <= 1e-6) return;
 
-    if (Tp > 1e-6) {
-      for (const contact of term.contacts || []) {
-        for (const side of ["enter", "leave"]) {
-          if (!strandResistsTension(rope, side)) continue;
-          const pull = side === "enter" ? contact.enterPull : contact.leavePull;
-          if (Math.hypot(pull.x, pull.y) < 0.15) continue;
-          const at = side === "enter" ? contact.enterPt : contact.leavePt;
-          drawTensionArrow(at, Tp * pull.x, Tp * pull.y);
-          nx += Tp * pull.x;
-          ny += Tp * pull.y;
-        }
-      }
-      // Lano uvázané za osu kladky
-      for (const which of ["start", "end"]) {
-        if (!endpointIfPulleyCenter(rope, which, term.obj)) continue;
-        const other = which === "start" ? "end" : "start";
-        if (!ropeEndResistsTension(rope, other)) continue;
-        const u = which === "start" ? c.attach.startU : c.attach.endU;
-        drawTensionArrow(origin, Tp * u.x, Tp * u.y);
-        nx += Tp * u.x;
-        ny += Tp * u.y;
+    for (const contact of term.contacts || []) {
+      for (const side of ["enter", "leave"]) {
+        if (!strandResistsTension(rope, side)) continue;
+        const pull = side === "enter" ? contact.enterPull : contact.leavePull;
+        if (Math.hypot(pull.x, pull.y) < 0.15) continue;
+        const at = side === "enter" ? contact.enterPt : contact.leavePt;
+        drawTensionArrow(at, Tp * pull.x, Tp * pull.y);
+        net.fx += Tp * pull.x;
+        net.fy += Tp * pull.y;
       }
     }
-
-    if (shouldDrawNetForce(nx, ny)) {
-      drawForceArrow(origin, nx, ny, "net");
+    // Lano uvázané za osu kladky
+    for (const which of ["start", "end"]) {
+      if (!endpointIfPulleyCenter(rope, which, term.obj)) continue;
+      const other = which === "start" ? "end" : "start";
+      if (!ropeEndResistsTension(rope, other)) continue;
+      const u = which === "start" ? c.attach.startU : c.attach.endU;
+      drawTensionArrow(origin, Tp * u.x, Tp * u.y);
+      net.fx += Tp * u.x;
+      net.fy += Tp * u.y;
     }
   }
 
@@ -5981,6 +6327,29 @@
     return best;
   }
 
+  /**
+   * Obepnutí lana v pořadí, v jakém je projde spojený tah. Když se lano
+   * připojuje obráceně (concatPoints jeho body převrací), musí se převrátit
+   * i pořadí obepnutí — jinak vznikne špatně navlečená topologie.
+   */
+  function wrapIdsAlongMerge(rope, which, position /* "before" | "after" */) {
+    const ids = (rope?.wrapIds || []).slice();
+    const reversed =
+      position === "before" ? which === "start" : which === "end";
+    return reversed ? ids.reverse() : ids;
+  }
+
+  /** Spojí seznamy obepnutí, zachová pořadí a vynechá duplicity. */
+  function joinWrapIds(...lists) {
+    const out = [];
+    for (const list of lists) {
+      for (const id of list || []) {
+        if (id && !out.includes(id)) out.push(id);
+      }
+    }
+    return out;
+  }
+
   function concatPoints(a, aWhich, bPoints) {
     const left =
       aWhich === "end" ? a.points.slice() : a.points.slice().reverse();
@@ -6546,9 +6915,11 @@
       attachFrom = findSnapTarget(p, null);
       if (attachFrom) {
         points = [{ x: attachFrom.point.x, y: attachFrom.point.y }];
-        if (attachFrom.rope.wrapIds) {
-          stickyIds = attachFrom.rope.wrapIds.slice();
-        }
+        stickyIds = wrapIdsAlongMerge(
+          attachFrom.rope,
+          attachFrom.which,
+          "before"
+        );
       } else {
         const anchorSnap = findAnchorSnapTarget(p);
         if (anchorSnap?.type === "weight") {
@@ -6676,16 +7047,13 @@
       } else if (endSnap) {
         ensureRopeEdgeSnap(endSnap.rope);
         rememberStickyFromPoints(pts, exclude);
-        if (endSnap.rope.wrapIds) {
-          for (const k of endSnap.rope.wrapIds) {
-            if (!stickyIds.includes(k) && !exclude.has(k)) stickyIds.push(k);
-          }
-        }
-        if (attachFrom && attachFrom.rope.wrapIds) {
-          for (const k of attachFrom.rope.wrapIds) {
-            if (!stickyIds.includes(k) && !exclude.has(k)) stickyIds.push(k);
-          }
-        }
+        stickyIds = joinWrapIds(
+          attachFrom
+            ? wrapIdsAlongMerge(attachFrom.rope, attachFrom.which, "before")
+            : [],
+          stickyIds,
+          wrapIdsAlongMerge(endSnap.rope, endSnap.which, "after")
+        ).filter((id) => !exclude.has(id));
         const otherEdgeSnap = endSnap.rope.edgeSnap;
         pts = concatPoints(
           { points: pts, closed: false },
@@ -6718,11 +7086,10 @@
         commitRope(draft, pts, false, mergedEdge, stickyIds);
       } else if (attachFrom) {
         ensureRopeEdgeSnap(attachFrom.rope);
-        if (attachFrom.rope.wrapIds) {
-          for (const k of attachFrom.rope.wrapIds) {
-            if (!stickyIds.includes(k) && !exclude.has(k)) stickyIds.push(k);
-          }
-        }
+        stickyIds = joinWrapIds(
+          wrapIdsAlongMerge(attachFrom.rope, attachFrom.which, "before"),
+          stickyIds
+        ).filter((id) => !exclude.has(id));
         edgeSnap.start = attachFrom.rope.edgeSnap.start;
         if (attachFrom.which === "start") {
           edgeSnap.end =
@@ -7123,12 +7490,11 @@
       } else if (mergeStart && mergeEnd) {
         ensureRopeEdgeSnap(mergeStart.rope);
         ensureRopeEdgeSnap(mergeEnd.rope);
-        for (const src of [mergeStart.rope, mergeEnd.rope]) {
-          if (!src.wrapIds) continue;
-          for (const id of src.wrapIds) {
-            if (!stickyIds.includes(id)) stickyIds.push(id);
-          }
-        }
+        stickyIds = joinWrapIds(
+          wrapIdsAlongMerge(mergeStart.rope, mergeStart.which, "before"),
+          stickyIds,
+          wrapIdsAlongMerge(mergeEnd.rope, mergeEnd.which, "after")
+        );
         let mergedPts = concatPoints(
           { points: mergeStart.rope.points, closed: false },
           mergeStart.which,
@@ -7161,11 +7527,10 @@
         commitRope(el, mergedPts, false, mergedEdge, stickyIds);
       } else if (mergeStart) {
         ensureRopeEdgeSnap(mergeStart.rope);
-        if (mergeStart.rope.wrapIds) {
-          for (const id of mergeStart.rope.wrapIds) {
-            if (!stickyIds.includes(id) && !exclude.has(id)) stickyIds.push(id);
-          }
-        }
+        stickyIds = joinWrapIds(
+          wrapIdsAlongMerge(mergeStart.rope, mergeStart.which, "before"),
+          stickyIds
+        ).filter((id) => !exclude.has(id));
         const mergedPts = concatPoints(
           { points: mergeStart.rope.points, closed: false },
           mergeStart.which,
@@ -7191,11 +7556,10 @@
         commitRope(el, mergedPts, false, mergedEdge, stickyIds);
       } else if (mergeEnd) {
         ensureRopeEdgeSnap(mergeEnd.rope);
-        if (mergeEnd.rope.wrapIds) {
-          for (const id of mergeEnd.rope.wrapIds) {
-            if (!stickyIds.includes(id) && !exclude.has(id)) stickyIds.push(id);
-          }
-        }
+        stickyIds = joinWrapIds(
+          stickyIds,
+          wrapIdsAlongMerge(mergeEnd.rope, mergeEnd.which, "after")
+        ).filter((id) => !exclude.has(id));
         const mergedPts = concatPoints(
           { points: pts, closed: false },
           "end",
@@ -7442,6 +7806,7 @@
         0,
         Math.max(0, height - h)
       )}px`;
+      pruneRopeWraps();
       rebuildAllRopes();
       syncAllWeightsToSnap();
       updateForceArrows();
@@ -7459,6 +7824,8 @@
       setStockDropTarget(false);
       if (ev && isOverStock(ev.clientX, ev.clientY)) {
         returnPulleyToStock(el);
+      } else {
+        resettleRopeWraps();
       }
       endUserAction();
     }
@@ -7604,6 +7971,7 @@
         nextAlong = alongForEdge(nextEdge, x, y);
       }
       apply(nextEdge, nextAlong);
+      if (pruneRopeWraps()) rebuildAllRopes();
     });
 
     function endDrag(e) {
@@ -7622,6 +7990,7 @@
       const y = e.clientY - rect.top;
       const nextEdge = nearestEdge(x, y);
       apply(nextEdge, alongForEdge(nextEdge, x, y));
+      resettleRopeWraps();
       endUserAction();
     }
 
@@ -7860,6 +8229,167 @@
   function moveFreePulleyBy(pulley, dx, dy) {
     setFreePulleyPositionDelta(pulley, dx, dy);
     rebuildAllRopes();
+  }
+
+  /** Model lana pro zkušební sadu obepnutí — do lana nic nezapisuje. */
+  function modelForWrapIds(rope, ids) {
+    return computeRopeModel(
+      {
+        points: rope.points,
+        closed: false,
+        edgeSnap: rope.edgeSnap,
+        wrapIds: ids,
+      },
+      { preserveWraps: true }
+    );
+  }
+
+  /**
+   * O kolik nejméně by se lano muselo prodloužit, aby se kola ještě dotklo.
+   * Velká hodnota znamená, že lano ke kladce vede (nesená kladka), malá, že se
+   * jí jen otírá. Když lano diskem prochází, obepnutí je nutné → Infinity.
+   */
+  function minWrapDetour(rope, ids, wheel, startPt, endPt) {
+    const rest = ids.filter((x) => x !== wheel.id);
+    const { pts } = modelChain(modelForWrapIds(rope, rest), startPt, endPt);
+    const center = { x: wheel.cx, y: wheel.cy };
+    let best = Infinity;
+
+    for (let i = 0; i + 1 < pts.length; i += 1) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const q = closestPointOnSegment(a, b, center);
+      if (dist(q, center) < wheel.r) return Infinity;
+      const touch = moveToward(center, q, wheel.r);
+      best = Math.min(best, dist(a, touch) + dist(touch, b) - dist(a, b));
+    }
+    return best;
+  }
+
+  /**
+   * Uvolní obepnutí, které lano nijak nevede — kladku uživatel odtáhl a lano se
+   * jí jen otírá. Nesená kladka (lano k ní zajíždí) i kladka, kterou by lano
+   * jinak procházelo, zůstávají.
+   */
+  function wrapIdsWithoutStale(rope, startPt, endPt) {
+    let ids = (rope.wrapIds || []).slice();
+    if (ids.length < 1) return ids;
+
+    for (let guard = 0; guard <= ids.length; guard += 1) {
+      const wheels = collectWheels();
+      let stale = null;
+
+      for (const id of ids) {
+        const wheel = wheels.find((w) => w.id === id);
+        if (!wheel) continue;
+        if (minWrapDetour(rope, ids, wheel, startPt, endPt) < WRAP_STALE_DETOUR) {
+          stale = id;
+          break;
+        }
+      }
+
+      if (!stale) break;
+      ids = ids.filter((x) => x !== stale);
+    }
+    return ids;
+  }
+
+  /**
+   * Napnuté lano vede nejkratší možnou dráhou, takže prohození sousedních
+   * obepnutí, které lano zřetelně zkrátí, je oprava navlečení po přesunu kladek.
+   */
+  function wrapIdsInTautOrder(rope, ids, startPt, endPt) {
+    if (ids.length < 2) return ids;
+    const lengthOf = (list) =>
+      measureModelLength(modelForWrapIds(rope, list), startPt, endPt);
+
+    let best = ids.slice();
+    let bestLen = lengthOf(best);
+    for (let guard = 0; guard < ids.length * 2; guard += 1) {
+      let improved = false;
+      for (let i = 0; i + 1 < best.length; i += 1) {
+        const cand = best.slice();
+        cand[i] = best[i + 1];
+        cand[i + 1] = best[i];
+        const len = lengthOf(cand);
+        if (len < bestLen - WRAP_REORDER_TOLERANCE) {
+          best = cand;
+          bestLen = len;
+          improved = true;
+          break;
+        }
+      }
+      if (!improved) break;
+    }
+    return best;
+  }
+
+  function setRopeWrapIds(rope, ids) {
+    const prev = rope.wrapIds || [];
+    if (prev.length === ids.length && prev.every((id, i) => id === ids[i])) {
+      return false;
+    }
+    rope.wrapIds = ids;
+    return true;
+  }
+
+  /**
+   * Body lana srovná s vykresleným tvarem (konce + tečné body). Bez toho by
+   * původní tah po přesunu kladek tvrdil starou topologii a hned obnovil
+   * obepnutí, které geometrie zrušila.
+   */
+  function syncRopePointsToShape(rope) {
+    if (rope.closed) return;
+    const startPt = getRopeEndPoint(rope, "start");
+    const endPt = getRopeEndPoint(rope, "end");
+    const { pts } = modelChain(
+      modelForWrapIds(rope, rope.wrapIds || []),
+      startPt,
+      endPt
+    );
+    if (pts.length >= 2) {
+      rope.points = pts.map((p) => ({ x: p.x, y: p.y }));
+    }
+  }
+
+  function ropesWithWraps() {
+    return ropes.filter(
+      (rope) => rope.el.isConnected && !rope.closed && rope.wrapIds?.length
+    );
+  }
+
+  /** Během tažení kladky: uvolni obepnutí, která lano už nedrží. */
+  function pruneRopeWraps() {
+    if (running) return false;
+    let changed = false;
+    for (const rope of ropesWithWraps()) {
+      const startPt = getRopeEndPoint(rope, "start");
+      const endPt = getRopeEndPoint(rope, "end");
+      if (setRopeWrapIds(rope, wrapIdsWithoutStale(rope, startPt, endPt))) {
+        syncRopePointsToShape(rope);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Po dotažení kladky: uvolni odpadlá obepnutí a oprav jejich pořadí. */
+  function resettleRopeWraps() {
+    if (running) return;
+    let changed = false;
+    for (const rope of ropesWithWraps()) {
+      const startPt = getRopeEndPoint(rope, "start");
+      const endPt = getRopeEndPoint(rope, "end");
+      const pruned = wrapIdsWithoutStale(rope, startPt, endPt);
+      const ordered = wrapIdsInTautOrder(rope, pruned, startPt, endPt);
+      if (setRopeWrapIds(rope, ordered)) changed = true;
+      syncRopePointsToShape(rope);
+    }
+    if (changed) {
+      rebuildAllRopes();
+      syncAllWeightsToSnap();
+      updateForceArrows();
+    }
   }
 
   function rebuildRope(rope, opts = {}) {
