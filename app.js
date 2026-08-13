@@ -54,6 +54,8 @@
 
   const CLOSE_SNAP_RADIUS = 28;
   const END_GRAB_RADIUS = 24;
+  /** Než se tažení rozjede, musí prst ujít pár pixelů — klik tak nic neposune. */
+  const DRAG_START_SLOP = 4;
   /**
    * Maximální obepnutí — těsně pod celým závitem. Volná kladka v oku lana,
    * jehož ramena se nad ní sbíhají, potřebuje výrazně víc než půlkruh.
@@ -72,8 +74,8 @@
   const WRAP_HUB_RATIO = 0.45;
   /** Nejkratší úsek tahu v pásmu přimknutí, který se ještě počítá jako obepnutí. */
   const WRAP_MIN_BAND_LENGTH = 12;
-  /** O kolik musí prohození obepnutí lano zkrátit, aby se topologie přerovnala. */
-  const WRAP_REORDER_TOLERANCE = 6;
+  /** Kolik pořadí obepnutí se zkusí, když stávající navlečení nelze projít. */
+  const WRAP_REORDER_MAX_TRIES = 48;
   /** Obepnutí, které lano prodlouží o méně, už lano nevede — uvolní se. */
   const WRAP_STALE_DETOUR = 6;
   /** Kolika obepnutím se hledá smysl oblouku hrubou silou (2^n variant). */
@@ -289,6 +291,7 @@
   }
 
   function endUserAction() {
+    tieRopeEndsAtPulleyCenters();
     if (historySuspended || running || !actionBaseline) {
       actionBaseline = null;
       return;
@@ -601,7 +604,7 @@
     handle.setAttribute("aria-label", "Velikost kladky");
     handle.setAttribute("aria-valuemin", "40");
     handle.setAttribute("aria-valuemax", "100");
-    handle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 12H3"/><path d="m3 12 3-3"/><path d="m3 12 3 3"/><path d="M17 12h4"/><path d="m21 12-3-3"/><path d="m21 12-3 3"/></svg>`;
+    handle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 7H11.5M4.5 4.5L2.5 7L4.5 9.5M9.5 4.5L11.5 7L9.5 9.5"/></svg>`;
     stage.appendChild(handle);
     enablePulleyResizeHandleDrag(handle);
     pulleyResizeHandle = handle;
@@ -616,11 +619,11 @@
       return;
     }
 
+    // Na vodorovném průměru kola — tažení do strany mění velikost
     const wheel = getWheelWorld(pulley.el, pulley.kind);
-    const angle = Math.PI / 4;
     const pad = 6;
-    handle.style.left = `${wheel.cx + (wheel.r + pad) * Math.cos(angle)}px`;
-    handle.style.top = `${wheel.cy + (wheel.r + pad) * Math.sin(angle)}px`;
+    handle.style.left = `${wheel.cx + wheel.r + pad}px`;
+    handle.style.top = `${wheel.cy}px`;
     handle.hidden = false;
     const pct = Math.round(getPulleyInstanceScale(pulley) * 100);
     handle.setAttribute("aria-valuenow", String(pct));
@@ -4941,8 +4944,9 @@
     layer.appendChild(g);
   }
 
-  /** Tažná síla lana — ve skutečném směru, i když míří dolů. */
+  /** Tažná síla lana — šipky ve směru tíhy (dolů) kvůli přehlednosti nekreslíme. */
   function drawTensionArrow(origin, fx, fy) {
+    if (fy > Math.hypot(fx, fy) * 0.02) return;
     drawForceArrow(origin, fx, fy, "tension");
   }
 
@@ -5848,6 +5852,7 @@
   function beginWeightSpawnDrag(e) {
     if (!ensureMoveToolForStock()) return;
     if (e.button != null && e.button !== 0) return;
+    clearPulleySelection();
     beginUserAction();
     const weight = createWeightInstance();
     const offsets = placeElUnderPointer(weight.el, e.clientX, e.clientY);
@@ -5918,6 +5923,7 @@
   function beginPulleySpawnDrag(kind, e) {
     if (!ensureMoveToolForStock()) return;
     if (e.button != null && e.button !== 0) return;
+    clearPulleySelection();
     beginUserAction();
     const pulley = createPulleyInstance(kind);
     if (!pulley) return;
@@ -6238,6 +6244,7 @@
   function beginWinchSpawnDrag(e) {
     if (!ensureMoveToolForStock()) return;
     if (e.button != null && e.button !== 0) return;
+    clearPulleySelection();
     beginUserAction();
     const winch = createWinchInstance();
     const offsets = placeElUnderPointer(winch.el, e.clientX, e.clientY);
@@ -7783,8 +7790,11 @@
 
   function enableFreeDrag(el) {
     let dragging = false;
+    let moved = false;
     let grabOffsetX = 0;
     let grabOffsetY = 0;
+    let startX = 0;
+    let startY = 0;
     let pointerId = null;
 
     function onMove(ev) {
@@ -7792,6 +7802,10 @@
       const overStock = isOverStock(ev.clientX, ev.clientY);
       setStockDropTarget(overStock);
       if (overStock) return;
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_START_SLOP) {
+        return;
+      }
+      moved = true;
       const { rect, width, height } = stageSize();
       const elRect = el.getBoundingClientRect();
       const w = elRect.width;
@@ -7824,7 +7838,7 @@
       setStockDropTarget(false);
       if (ev && isOverStock(ev.clientX, ev.clientY)) {
         returnPulleyToStock(el);
-      } else {
+      } else if (moved) {
         resettleRopeWraps();
       }
       endUserAction();
@@ -7837,11 +7851,21 @@
       beginUserAction();
       const { rect } = stageSize();
       const elRect = el.getBoundingClientRect();
-      el.style.left = `${elRect.left - rect.left}px`;
-      el.style.top = `${elRect.top - rect.top}px`;
-      grabOffsetX = e.clientX - elRect.left;
-      grabOffsetY = e.clientY - elRect.top;
+      // Vykreslený obdélník bývá zaokrouhlený na pixely, styl drží přesnou polohu
+      const styleLeft = parseFloat(el.style.left);
+      const styleTop = parseFloat(el.style.top);
+      const startLeft = Number.isFinite(styleLeft)
+        ? styleLeft
+        : elRect.left - rect.left;
+      const startTop = Number.isFinite(styleTop) ? styleTop : elRect.top - rect.top;
+      el.style.left = `${startLeft}px`;
+      el.style.top = `${startTop}px`;
+      grabOffsetX = e.clientX - rect.left - startLeft;
+      grabOffsetY = e.clientY - rect.top - startTop;
+      startX = e.clientX;
+      startY = e.clientY;
       dragging = true;
+      moved = false;
       pointerId = e.pointerId;
       el.classList.add("is-dragging");
       try {
@@ -7860,8 +7884,11 @@
     let edge = initial?.edge || el.dataset.edge || "top";
     let along = initial?.along != null ? initial.along : 0;
     let dragging = false;
+    let moved = false;
     let pointerId = null;
     let grabOffsetAlong = 0;
+    let startX = 0;
+    let startY = 0;
 
     function naturalSize() {
       return {
@@ -7931,6 +7958,13 @@
       return y;
     }
 
+    /** Cíl tažení se drží místa, za které kladku držíme — jinak by ucukla. */
+    function dragTarget(x, y) {
+      const nextEdge = nearestEdge(x, y);
+      if (nextEdge !== edge) grabOffsetAlong = 0;
+      return { edge: nextEdge, along: alongForEdge(nextEdge, x, y) - grabOffsetAlong };
+    }
+
     el.addEventListener("pointerdown", (e) => {
       if (tool !== "move" || running) return;
       if (e.button != null && e.button !== 0) return;
@@ -7944,7 +7978,10 @@
       } else {
         grabOffsetAlong = y - along;
       }
+      startX = e.clientX;
+      startY = e.clientY;
       dragging = true;
+      moved = false;
       pointerId = e.pointerId;
       el.classList.add("is-dragging");
       el.setPointerCapture(e.pointerId);
@@ -7956,21 +7993,13 @@
       const overStock = isOverStock(e.clientX, e.clientY);
       setStockDropTarget(overStock);
       if (overStock) return;
+      if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_START_SLOP) {
+        return;
+      }
       const { rect } = stageSize();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const nextEdge = nearestEdge(x, y);
-      let nextAlong;
-      if (nextEdge === "top" || nextEdge === "bottom") {
-        nextAlong = x - (nextEdge === edge ? grabOffsetAlong : 0);
-      } else {
-        nextAlong = y - (nextEdge === edge ? grabOffsetAlong : 0);
-      }
-      if (nextEdge !== edge) {
-        grabOffsetAlong = 0;
-        nextAlong = alongForEdge(nextEdge, x, y);
-      }
-      apply(nextEdge, nextAlong);
+      const target = dragTarget(e.clientX - rect.left, e.clientY - rect.top);
+      moved = true;
+      apply(target.edge, target.along);
       if (pruneRopeWraps()) rebuildAllRopes();
     });
 
@@ -7985,12 +8014,14 @@
         endUserAction();
         return;
       }
-      const { rect } = stageSize();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const nextEdge = nearestEdge(x, y);
-      apply(nextEdge, alongForEdge(nextEdge, x, y));
-      resettleRopeWraps();
+      if (moved) {
+        if (e) {
+          const { rect } = stageSize();
+          const target = dragTarget(e.clientX - rect.left, e.clientY - rect.top);
+          apply(target.edge, target.along);
+        }
+        resettleRopeWraps();
+      }
       endUserAction();
     }
 
@@ -8294,34 +8325,87 @@
     return ids;
   }
 
+  /** Rovné úseky lana mezi obepnutími (a od konců k prvnímu/poslednímu). */
+  function modelStraightSegments(model, startPt, endPt) {
+    const { pts, items } = modelChain(model, startPt, endPt);
+    const out = [];
+    let from = 0;
+    for (const item of items) {
+      out.push([pts[from], pts[item.enterIdx]]);
+      from = item.enterIdx + 1;
+    }
+    out.push([pts[from], pts[pts.length - 1]]);
+    return out;
+  }
+
   /**
-   * Napnuté lano vede nejkratší možnou dráhou, takže prohození sousedních
-   * obepnutí, které lano zřetelně zkrátí, je oprava navlečení po přesunu kladek.
+   * Navlečení, kterým lano projít nemůže: obepnutí v tomto pořadí nevznikne,
+   * nebo by rovný úsek musel projít diskem kladky.
+   */
+  function wrapOrderIsImpossible(rope, ids, startPt, endPt) {
+    const model = modelForWrapIds(rope, ids);
+    if (model.wraps.length !== ids.length) return true;
+    const wheels = collectWheels().filter((w) => ids.includes(w.id));
+    for (const [a, b] of modelStraightSegments(model, startPt, endPt)) {
+      for (const wheel of wheels) {
+        if (segmentPiercesWheel(a, b, wheel, 3)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Obepnutí kladky hned u konce uvázaného za její osu se při kreslení zahodí
+   * (z osy jde lano rovně), takže takové pořadí by obepnutí tiše smazalo.
+   */
+  function wrapOrderKeepsCenterTies(rope, ids) {
+    const start = normalizeEndSnap(rope.edgeSnap?.start);
+    const end = normalizeEndSnap(rope.edgeSnap?.end);
+    if (isPulleyCenterSnap(start) && ids[0] === start.pulleyId) return false;
+    if (isPulleyCenterSnap(end) && ids[ids.length - 1] === end.pulleyId) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Navlečené lano si pořadí kladek nevybírá, i kdyby jiné bylo kratší — pořadí
+   * proto měníme jen tehdy, když se stávajícím po přesunu kladky lano projít
+   * nedá. Z průchodných pořadí pak vezmeme nejkratší.
    */
   function wrapIdsInTautOrder(rope, ids, startPt, endPt) {
     if (ids.length < 2) return ids;
-    const lengthOf = (list) =>
-      measureModelLength(modelForWrapIds(rope, list), startPt, endPt);
+    if (!wrapOrderIsImpossible(rope, ids, startPt, endPt)) return ids;
 
-    let best = ids.slice();
-    let bestLen = lengthOf(best);
-    for (let guard = 0; guard < ids.length * 2; guard += 1) {
-      let improved = false;
-      for (let i = 0; i + 1 < best.length; i += 1) {
-        const cand = best.slice();
-        cand[i] = best[i + 1];
-        cand[i + 1] = best[i];
-        const len = lengthOf(cand);
-        if (len < bestLen - WRAP_REORDER_TOLERANCE) {
+    const seen = new Set([ids.join("|")]);
+    const queue = [ids.slice()];
+    let best = null;
+    let bestLen = Infinity;
+
+    while (queue.length && seen.size <= WRAP_REORDER_MAX_TRIES) {
+      const cur = queue.shift();
+      for (let i = 0; i + 1 < cur.length; i += 1) {
+        const cand = cur.slice();
+        cand[i] = cur[i + 1];
+        cand[i + 1] = cur[i];
+        const key = cand.join("|");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        queue.push(cand);
+        if (!wrapOrderKeepsCenterTies(rope, cand)) continue;
+        if (wrapOrderIsImpossible(rope, cand, startPt, endPt)) continue;
+        const len = measureModelLength(
+          modelForWrapIds(rope, cand),
+          startPt,
+          endPt
+        );
+        if (len < bestLen) {
           best = cand;
           bestLen = len;
-          improved = true;
-          break;
         }
       }
-      if (!improved) break;
     }
-    return best;
+    return best || ids;
   }
 
   function setRopeWrapIds(rope, ids) {
@@ -8449,6 +8533,52 @@
         edgeSnap: rope.edgeSnap,
       })
     );
+  }
+
+  /**
+   * Volný konec lana, který leží na ose kladky, se za ni uváže. Když kladka
+   * konci přijede osou pod ruku (posun, změna velikosti, krok zpět), lano jinak
+   * vypadá uvázané, ale nenese žádný tah. Spouští se až po dokončení úkonu, aby
+   * kladka tažená přes plochu nesbírala konce, kterých se jen mimochodem dotkne.
+   */
+  function adoptRopeEndsAtPulleyCenters() {
+    if (running || settling) return false;
+    let tied = false;
+    const wheels = collectWheels();
+    for (const rope of ropes) {
+      if (!rope.el.isConnected || rope.closed) continue;
+      ensureRopeEdgeSnap(rope);
+      for (const which of ["start", "end"]) {
+        if (rope.edgeSnap[which]) continue;
+        if (isRopeEndTaken(rope, which, null, null)) continue;
+        const p = getRopeEndPoint(rope, which);
+        let best = null;
+        for (const wheel of wheels) {
+          const d = dist(p, { x: wheel.cx, y: wheel.cy });
+          if (d > pulleyCenterSnapRadius(wheel)) continue;
+          if (!best || d < best.d) best = { id: wheel.id, d };
+        }
+        if (!best) continue;
+
+        rope.edgeSnap[which] = { type: "pulleyCenter", pulleyId: best.id };
+        // Z osy jde lano rovně, přilehlé obepnutí téže kladky proto odpadá
+        const ids = (rope.wrapIds || []).slice();
+        const at = which === "start" ? 0 : ids.length - 1;
+        if (ids[at] === best.id) {
+          ids.splice(at, 1);
+          rope.wrapIds = ids;
+        }
+        syncRopeEdgePoint(rope, which);
+        tied = true;
+      }
+    }
+    return tied;
+  }
+
+  function tieRopeEndsAtPulleyCenters() {
+    if (!adoptRopeEndsAtPulleyCenters()) return;
+    rebuildAllRopes();
+    syncRopeEndHandles();
   }
 
   function rebuildAllRopes() {
